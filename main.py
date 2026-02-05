@@ -1604,10 +1604,7 @@ def main():
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", cmd_start),
-            CommandHandler("reset", cmd_reset),
             CommandHandler("menu", cmd_menu),
-            MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text),
-            MessageHandler(filters.PHOTO, handle_photo_upload),
         ],
         states={
             ST_COUNTRY: [CallbackQueryHandler(handle_country, pattern="^c_")],
@@ -1651,15 +1648,8 @@ def main():
         ],
     )
 
-    # Reset MUST be outside and before ConversationHandler
-    async def cmd_reset_standalone(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        delete_user(update.effective_user.id)
-        ctx.user_data.clear()
-        await update.message.reply_text(
-            "Su cuenta ha sido reiniciada.\nEscriba /start para comenzar de nuevo.")
-
-    app.add_handler(CommandHandler("reset", cmd_reset_standalone), group=-1)
     app.add_handler(conv)
+    app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("approve2", cmd_approve2))
     app.add_handler(CommandHandler("approve3", cmd_approve3))
     app.add_handler(CommandHandler("reply", cmd_reply))
