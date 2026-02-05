@@ -1604,6 +1604,7 @@ def main():
     conv = ConversationHandler(
         entry_points=[
             CommandHandler("start", cmd_start),
+            CommandHandler("reset", cmd_reset),
             CommandHandler("menu", cmd_menu),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text),
             MessageHandler(filters.PHOTO, handle_photo_upload),
