@@ -8,6 +8,19 @@ Updated:    2026-02-05
 
 CHANGELOG:
 ----------
+v5.0.2 (2026-02-05)
+  - GROK RESEARCH INTEGRATION:
+  - Added vulnerability clause FAQ (no job offer needed)
+  - Added expanded proof of residency FAQ (40+ doc types, 8 categories)
+  - Added approval rate messaging FAQ (80-90% with caveats)
+  - Added digital submission FAQ (100% online)
+  - Added 2005 comparison FAQ
+  - Added detailed timeline FAQ
+  - Updated eligibility result screen with vulnerability + approval info
+  - New NLU intents: online_submission, approval_rate, comparison_2005
+  - Expanded 'work' intent to catch vulnerability-related queries
+  - Intent-to-FAQ routing for direct responses
+
 v5.0.1 (2026-02-05)
   - Restored from v4: progress bar visual in main menu
   - Restored from v4: demonyms in country data
@@ -320,7 +333,8 @@ INTENT_PATTERNS = {
     ],
     "work": [
         r"\btrabajar\b", r"\btrabajo\b", r"\bcontrato\b", r"\bautónom[oa]\b",
-        r"\bempleo\b", r"\bempresa\b",
+        r"\bempleo\b", r"\bempresa\b", r"\bempleador\b", r"\bpatrón\b",
+        r"\boferta de trabajo\b", r"\bvulnerab",
     ],
     "family": [
         r"\bhij[oa]s?\b", r"\bmenor", r"\bfamilia\b", r"\bbebé\b",
@@ -337,6 +351,18 @@ INTENT_PATTERNS = {
     "trust": [
         r"\bestafa\b", r"\bconfia[rn]?\b", r"\bsegur[oa]\b", r"\bfraude\b",
         r"\blegítim[oa]\b", r"\breal\b", r"\bverdad\b", r"\bfiar\b",
+    ],
+    "online_submission": [
+        r"\bpresencial\b", r"\boficina\b", r"\btelemátic", r"\bonline\b",
+        r"\bcita previa\b", r"\bcola\b", r"\bhay que ir\b",
+    ],
+    "approval_rate": [
+        r"\bprobabilidad\b", r"\bme van a aprobar\b", r"\brechaz",
+        r"\bposibilidades\b", r"\bfunciona esto\b", r"\bqué posibilidad",
+    ],
+    "comparison_2005": [
+        r"\b2005\b", r"\banterior\b", r"\bla última vez\b",
+        r"\bproceso anterior\b",
     ],
 }
 
@@ -537,6 +563,117 @@ FAQ = {
             "Además, un error en la solicitud puede significar la denegación "
             "y la pérdida de la oportunidad. El coste de no hacerlo bien "
             "es mucho mayor que el de hacerlo con profesionales."
+        ),
+    },
+    # === GROK RESEARCH ADDITIONS (2026-02-05) ===
+    "vulnerabilidad": {
+        "title": "No necesitas contrato de trabajo",
+        "keywords": ["contrato", "oferta", "empleador", "vulnerable", "vulnerabilidad",
+                     "patron", "sin empleo", "trabajo necesito", "me piden contrato"],
+        "text": (
+            "*No necesitas oferta de trabajo.*\n\n"
+            "A diferencia del proceso de 2005, este decreto presume "
+            "*vulnerabilidad* por estar en situación irregular.\n\n"
+            "Esto significa:\n"
+            "- NO necesita un contrato de trabajo.\n"
+            "- NO necesita un empleador que le patrocine.\n"
+            "- NO necesita demostrar ingresos mínimos.\n\n"
+            "El decreto reconoce que estar sin papeles ya es una situación "
+            "de vulnerabilidad. Es la diferencia más grande con procesos anteriores.\n\n"
+            "Solo necesita demostrar:\n"
+            "1. Que llegó antes del 31/12/2025.\n"
+            "2. Que lleva 5+ meses en España.\n"
+            "3. Que no tiene antecedentes penales graves."
+        ),
+    },
+    "pruebas_residencia": {
+        "title": "Documentos que sirven como prueba",
+        "keywords": ["prueba", "demostrar", "no tengo empadronamiento", "qué sirve",
+                     "prueba de residencia", "cómo demuestro", "qué documentos sirven"],
+        "text": (
+            "*El decreto acepta CUALQUIER documento público o privado.*\n\n"
+            "No necesita empadronamiento obligatoriamente. Sirven combinaciones de:\n\n"
+            "🏠 Vivienda: facturas de luz/agua/gas, contrato de alquiler.\n"
+            "🏥 Médicos: citas médicas, recetas, tarjeta sanitaria (SIP), vacunaciones.\n"
+            "🏦 Bancarios: extractos bancarios, recibos de Western Union o Ria.\n"
+            "🚌 Transporte: abono transporte, billetes de tren/bus, recibos de Cabify.\n"
+            "📚 Educación: matrícula escolar (suya o de sus hijos), cursos de español.\n"
+            "💼 Trabajo: nóminas, registros de Glovo/Uber Eats, facturas autónomo.\n"
+            "📱 Vida diaria: facturas de móvil, abono de gimnasio, correo postal.\n"
+            "⛪ Comunidad: iglesia/mezquita, voluntariado en ONGs.\n\n"
+            "Combinar 3-5 documentos de diferentes categorías es lo ideal. "
+            "Más documentos = menos riesgo de rechazo."
+        ),
+    },
+    "aprobacion": {
+        "title": "Probabilidades de aprobación",
+        "keywords": ["probabilidad", "aprobar", "rechazar", "funciona", "posibilidades",
+                     "me van a aprobar", "van a rechazar", "qué posibilidades"],
+        "text": (
+            "*Basado en el proceso de 2005 (el último en España):*\n\n"
+            "- Se aprobaron entre el 80-90% de las solicitudes.\n"
+            "- El gobierno ha diseñado este decreto para ser flexible.\n"
+            "- Los expertos esperan un umbral bajo de exigencia.\n\n"
+            "No podemos garantizar la aprobación de ningún caso individual. "
+            "Pero si cumple los requisitos básicos y presenta documentación "
+            "razonable, las probabilidades están muy a su favor.\n\n"
+            "El gobierno quiere regularizar — ha diseñado el proceso para "
+            "aprobar, no para rechazar. Nuestro trabajo es asegurarnos de que "
+            "su solicitud sea lo más fuerte posible."
+        ),
+    },
+    "presentacion_online": {
+        "title": "La presentación es 100% online",
+        "keywords": ["presencial", "oficina", "telemático", "online", "internet",
+                     "hay que ir", "cita previa", "cómo se presenta"],
+        "text": (
+            "*Las solicitudes se presentan de forma telemática.*\n\n"
+            "No necesita ir a ninguna oficina:\n"
+            "- No necesita cita previa.\n"
+            "- No necesita hacer cola.\n"
+            "- Autorización provisional de trabajo inmediata al presentar.\n\n"
+            "Nosotros nos encargamos de:\n"
+            "- Preparar toda la documentación.\n"
+            "- Revisarla legalmente.\n"
+            "- Presentarla por usted de forma digital.\n"
+            "- Dar seguimiento hasta la resolución."
+        ),
+    },
+    "diferencia_2005": {
+        "title": "Diferencias con el proceso de 2005",
+        "keywords": ["2005", "anterior", "diferencia", "la última vez", "proceso anterior"],
+        "text": (
+            "*Diferencias con el proceso de 2005:*\n\n"
+            "2005: Necesitaba contrato de trabajo.\n"
+            "2026: NO necesita contrato. ✅\n\n"
+            "2005: Solo trabajadores.\n"
+            "2026: Incluye vulnerabilidad. ✅\n\n"
+            "2005: Presencial.\n"
+            "2026: 100% online. ✅\n\n"
+            "2005: Más documentación exigida.\n"
+            "2026: Más flexible en pruebas. ✅\n\n"
+            "2005: 80-90% aprobación.\n"
+            "2026: Expectativa similar o mejor. ✅\n\n"
+            "La diferencia más importante: en 2005 necesitaba un empleador. "
+            "En 2026, NO."
+        ),
+    },
+    "plazos_detalle": {
+        "title": "Fechas clave detalladas",
+        "keywords": ["plazo detalle", "calendario", "cuánto tarda", "resolución",
+                     "admisión", "provisional"],
+        "text": (
+            "*Calendario completo:*\n\n"
+            "Aprobación del decreto: 27 de enero de 2026. ✅\n"
+            "Plazo de solicitud: 1 de abril — 30 de junio de 2026.\n"
+            "Duración: 3 meses exactos, sin prórroga confirmada.\n\n"
+            "Tras presentar la solicitud:\n"
+            "- Admisión inicial: máximo 15 días.\n"
+            "- Autorización provisional de trabajo: inmediata.\n"
+            "- Resolución final: máximo 3 meses.\n\n"
+            "Recomendación: no espere al último momento. Prepare sus documentos "
+            "AHORA para presentar en abril. Los primeros en presentar = "
+            "primeros en recibir respuesta."
         ),
     },
 }
@@ -1116,15 +1253,20 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     await q.edit_message_text(
         f"*{name}, cumple los requisitos básicos para la regularización.*\n\n"
         f"Le hemos asignado el número de expediente *{case['case_number']}*.\n\n"
-        f"Plazo de solicitudes: abril — 30 de junio de 2026.\n"
-        f"Quedan *{days_left()} días*.\n\n"
+        "💡 *¿Sabía que?* Este decreto NO requiere contrato de trabajo. "
+        "Se presume vulnerabilidad por estar en situación irregular.\n\n"
+        "📊 En el proceso de 2005, se aprobaron el 80-90% de solicitudes. "
+        "Este decreto es aún más flexible.\n\n"
+        f"📅 Plazo: 1 abril — 30 junio 2026 ({days_left()} días).\n"
+        "💻 Presentación: 100% online.\n\n"
         "El siguiente paso es preparar su documentación. "
         "Puede empezar ahora mismo — es completamente gratuito.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Ver documentos necesarios", callback_data="fq_documentos")],
-            [InlineKeyboardButton("Ver costos del servicio", callback_data="m_price")],
-            [InlineKeyboardButton("Empezar a subir documentos", callback_data="m_upload")],
+            [InlineKeyboardButton("📄 Ver qué documentos necesito", callback_data="fq_pruebas_residencia")],
+            [InlineKeyboardButton("💰 Ver precios del servicio", callback_data="m_price")],
+            [InlineKeyboardButton("📤 Empezar a subir documentos", callback_data="m_upload")],
+            [InlineKeyboardButton("❓ Tengo más preguntas", callback_data="m_faq")],
         ]),
     )
     return ST_ELIGIBLE
@@ -1491,6 +1633,25 @@ async def handle_free_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
 
     if intent == "status":
         return await show_main_menu(update, ctx)
+
+    # Route new Grok intents directly to their FAQ entries
+    intent_faq_map = {
+        "work": "vulnerabilidad",
+        "online_submission": "presentacion_online",
+        "approval_rate": "aprobacion",
+        "comparison_2005": "diferencia_2005",
+    }
+    if intent in intent_faq_map:
+        faq = FAQ.get(intent_faq_map[intent])
+        if faq:
+            await update.message.reply_text(
+                faq["text"],
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Verificar mi elegibilidad", callback_data="back")],
+                    [InlineKeyboardButton("Más preguntas", callback_data="m_faq")],
+                ]))
+            return ST_MAIN_MENU
 
     # Try FAQ match
     faq = find_faq_match(text)
