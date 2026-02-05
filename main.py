@@ -1,24 +1,37 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v5.0.0 — Client Intake & Case Management
+PH-Bot v5.0.1 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
 Updated:    2026-02-05
 
-WHAT'S NEW IN v5.0:
+CHANGELOG:
+----------
+v5.0.1 (2026-02-05)
+  - Restored from v4: progress bar visual in main menu
+  - Restored from v4: demonyms in country data
+  - Restored from v4: contact_lawyer / contact_help callbacks
+  - Fixed: /reset now works (entry_points matched v4 pattern)
+
+v5.0.0 (2026-02-05)
   - Professional lawyer tone (no slang, no "quiubo parce")
   - NLU: handles free-text messages, not just button taps
   - OCR document scanning + auto-classification
   - 5-layer document validation pipeline
   - Smart escalation (bot → FAQ → canned → queue → human)
-  - Lawyer-presence signals throughout ("Su abogado ha revisado…")
-  - Comprehensive FAQ (50+ topics from objection-handling research)
+  - Comprehensive FAQ (11 topics vs 6 in v4)
   - Correct payment structure per PAYMENT_STRATEGY.md:
         Phase 1 FREE → Phase 2 €47 → Phase 3 €150 → Phase 4 €100
-  - Country-specific document guidance
-  - Personalized progress tracking
-  - Admin tools: /approve2, /approve3, /stats, /broadcast, /flag
+  - Country-specific antecedentes guidance
+  - Message logging database
+  - Admin tools: /approve2, /approve3, /reply, /stats, /broadcast
+
+v4.0.0 (2026-02-04)
+  - Country selection with flags
+  - Progressive payment (wrong amounts: €9.99 → €89.01 → €199 → €38.28)
+  - FAQ carousel, /reset command
+  - Carried from v3: NLU, document scanning (lost in v4 rewrite, restored in v5)
 
 ENV VARS:
   TELEGRAM_BOT_TOKEN  (required)
@@ -135,7 +148,7 @@ PRICING = {
 
 COUNTRIES = {
     "co": {
-        "name": "Colombia", "flag": "🇨🇴",
+        "name": "Colombia", "flag": "🇨🇴", "demonym": "colombiano/a",
         "antecedentes_url": "https://antecedentes.policia.gov.co",
         "antecedentes_online": True,
         "antecedentes_price": 35,
@@ -143,7 +156,7 @@ COUNTRIES = {
         "hague": True,
     },
     "ve": {
-        "name": "Venezuela", "flag": "🇻🇪",
+        "name": "Venezuela", "flag": "🇻🇪", "demonym": "venezolano/a",
         "antecedentes_url": "https://tramites.ministeriopublico.gob.ve",
         "antecedentes_online": False,
         "antecedentes_price": 59,
@@ -151,7 +164,7 @@ COUNTRIES = {
         "hague": True,
     },
     "pe": {
-        "name": "Perú", "flag": "🇵🇪",
+        "name": "Perú", "flag": "🇵🇪", "demonym": "peruano/a",
         "antecedentes_url": "https://portal.policia.gob.pe/antecedentes_policiales/",
         "antecedentes_online": True,
         "antecedentes_price": 45,
@@ -159,7 +172,7 @@ COUNTRIES = {
         "hague": True,
     },
     "ec": {
-        "name": "Ecuador", "flag": "🇪🇨",
+        "name": "Ecuador", "flag": "🇪🇨", "demonym": "ecuatoriano/a",
         "antecedentes_url": "https://certificados.ministeriodelinterior.gob.ec",
         "antecedentes_online": True,
         "antecedentes_price": 35,
@@ -167,21 +180,21 @@ COUNTRIES = {
         "hague": True,
     },
     "hn": {
-        "name": "Honduras", "flag": "🇭🇳",
+        "name": "Honduras", "flag": "🇭🇳", "demonym": "hondureño/a",
         "antecedentes_online": False,
         "antecedentes_price": 79,
         "apostille_info": "Requiere gestión presencial o mediante contacto local.",
         "hague": True,
     },
     "bo": {
-        "name": "Bolivia", "flag": "🇧🇴",
+        "name": "Bolivia", "flag": "🇧🇴", "demonym": "boliviano/a",
         "antecedentes_online": False,
         "antecedentes_price": 79,
         "apostille_info": "Apostilla en Cancillería. Proceso presencial.",
         "hague": True,
     },
     "ar": {
-        "name": "Argentina", "flag": "🇦🇷",
+        "name": "Argentina", "flag": "🇦🇷", "demonym": "argentino/a",
         "antecedentes_url": "https://www.dnrec.jus.gov.ar",
         "antecedentes_online": True,
         "antecedentes_price": 45,
@@ -189,14 +202,14 @@ COUNTRIES = {
         "hague": True,
     },
     "ma": {
-        "name": "Marruecos", "flag": "🇲🇦",
+        "name": "Marruecos", "flag": "🇲🇦", "demonym": "marroquí",
         "antecedentes_online": False,
         "antecedentes_price": 79,
         "apostille_info": "Requiere legalización (no Apostilla — no es miembro del Convenio de La Haya). Legalización consular.",
         "hague": False,
     },
     "other": {
-        "name": "Otro país", "flag": "🌍",
+        "name": "Otro país", "flag": "🌍", "demonym": "",
         "antecedentes_online": False,
         "antecedentes_price": 89,
         "apostille_info": "Consulte con nuestro equipo para su caso específico.",
@@ -1128,9 +1141,14 @@ async def show_main_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     case = get_or_create_case(update.effective_user.id)
     dc = get_doc_count(update.effective_user.id)
 
+    # Progress bar (from v4)
+    progress = case.get("progress", 0)
+    bar = "█" * (progress // 10) + "░" * (10 - progress // 10)
+
     msg = (
         f"*{name}* — Expediente {case['case_number']}\n"
         f"Fase actual: {phase_name(user)}\n\n"
+        f"Progreso: {bar} {progress}%\n"
         f"Documentos subidos: {dc}\n"
         f"{phase_status(user, dc)}\n\n"
         f"Quedan {days_left()} días para el cierre del plazo."
@@ -1265,6 +1283,19 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
     if d == "back":
         return await show_main_menu(update, ctx)
+
+    if d in ("contact_lawyer", "contact_help"):
+        await q.edit_message_text(
+            "*Contacto con un abogado*\n\n"
+            f"WhatsApp: {SUPPORT_PHONE}\n"
+            "Teléfono: +34 91 555 0123\n"
+            "Email: info@tuspapeles2026.es\n\n"
+            "Un abogado revisará su caso personalmente.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Volver al inicio", callback_data="restart")],
+            ]))
+        return ST_CONTACT
 
     if d == "restart":
         await q.message.reply_text(
