@@ -21,6 +21,14 @@ v5.0.2 (2026-02-05)
   - Expanded 'work' intent to catch vulnerability-related queries
   - Intent-to-FAQ routing for direct responses
 
+v5.0.3 (2026-02-05)
+  - BUGFIXES from full audit:
+  - FIXED: /reset now in entry_points (was only in fallbacks — didn't work mid-conversation)
+  - FIXED: m_pay3 handler added (button existed but did nothing)
+  - FIXED: paid3 handler + admin notification for Phase 3 payments
+  - REMOVED: dead contact_lawyer/contact_help handlers (no buttons used them)
+  - NOTE: ST_SERVICE_INFO kept in states dict for future use but currently unreachable
+
 v5.0.1 (2026-02-05)
   - Restored from v4: progress bar visual in main menu
   - Restored from v4: demonyms in country data
@@ -1423,21 +1431,41 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Recibirá una notificación cuando esté activado.")
         return ConversationHandler.END
 
-    if d == "back":
-        return await show_main_menu(update, ctx)
-
-    if d in ("contact_lawyer", "contact_help"):
+    if d == "m_pay3":
         await q.edit_message_text(
-            "*Contacto con un abogado*\n\n"
-            f"WhatsApp: {SUPPORT_PHONE}\n"
-            "Teléfono: +34 91 555 0123\n"
-            "Email: info@tuspapeles2026.es\n\n"
-            "Un abogado revisará su caso personalmente.",
+            f"*Preparación del expediente — €150*\n\n"
+            "Sus documentos han sido verificados. Con este pago, nuestro equipo realizará:\n\n"
+            "- Expediente legal completo.\n"
+            "- Todos los formularios completados y revisados.\n"
+            "- Revisión final por abogado.\n"
+            "- Puesto reservado en cola de presentación.\n\n"
+            "*Formas de pago:*\n"
+            f"Bizum: {BIZUM_PHONE}\n"
+            f"Transferencia: {BANK_IBAN}\n"
+            "Concepto: su nombre + número de expediente.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Volver al inicio", callback_data="restart")],
+                [InlineKeyboardButton("Ya he realizado el pago", callback_data="paid3")],
+                [InlineKeyboardButton("Tengo dudas", callback_data="m_contact")],
+                [InlineKeyboardButton("← Volver", callback_data="back")],
             ]))
-        return ST_CONTACT
+        return ST_PAY_PHASE3
+
+    if d == "paid3":
+        update_user(update.effective_user.id, state="phase3_pending")
+        await notify_admins(ctx,
+            f"💳 *Pago Fase 3 pendiente*\n"
+            f"Usuario: {user.get('first_name')}\n"
+            f"TID: {update.effective_user.id}\n"
+            f"Aprobar: `/approve3 {update.effective_user.id}`")
+        await q.edit_message_text(
+            "Hemos registrado su notificación de pago.\n\n"
+            "Lo verificaremos y comenzaremos la preparación de su expediente. "
+            "Recibirá una notificación cuando esté activado.")
+        return ConversationHandler.END
+
+    if d == "back":
+        return await show_main_menu(update, ctx)
 
     if d == "restart":
         await q.message.reply_text(
@@ -1797,6 +1825,7 @@ def main():
         entry_points=[
             CommandHandler("start", cmd_start),
             CommandHandler("menu", cmd_menu),
+            CommandHandler("reset", cmd_reset),
         ],
         states={
             ST_COUNTRY: [CallbackQueryHandler(handle_country, pattern="^c_")],
