@@ -1487,8 +1487,11 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     delete_user(update.effective_user.id)
+    ctx.user_data.clear()  # Clear conversation context
     await update.message.reply_text(
-        "Su cuenta ha sido reiniciada.\nEscriba /start para comenzar de nuevo."
+        "✅ Su cuenta ha sido eliminada completamente.\n\n"
+        "Todos sus datos, documentos y progreso han sido borrados.\n"
+        "Escriba /start para comenzar de nuevo."
     )
     return ConversationHandler.END
 
@@ -1678,8 +1681,14 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def show_main_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     user = get_user(update.effective_user.id)
-    if not user:
-        user = create_user(update.effective_user.id, update.effective_user.first_name or "Usuario")
+    if not user or not user.get("eligible"):
+        # User doesn't exist or hasn't completed eligibility - redirect to start
+        msg = "Escriba /start para comenzar el proceso de regularización."
+        if update.callback_query:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
+        return ConversationHandler.END
 
     name = user.get("full_name") or user.get("first_name", "Usuario")
     case = get_or_create_case(update.effective_user.id)
@@ -1699,7 +1708,7 @@ async def show_main_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         progress = 15 + (dc_temp * 10)
     else:
         progress = 10
-    bar = "â–ˆ" * (progress // 10) + "â–'" * (10 - progress // 10)
+    bar = "█" * (progress // 10) + "░" * (10 - progress // 10)
 
     msg = (
         f"*{name}* — Expediente {case['case_number']}\n"
