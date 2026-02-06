@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v5.1.0 — Client Intake & Case Management
+PH-Bot v5.2.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
-Updated:    2026-02-05
+Updated:    2026-02-06
 
 CHANGELOG:
 ----------
+v5.2.0 (2026-02-06)
+  - INFRASTRUCTURE & FEATURES:
+  - FIXED: UTF-8 encoding corruption (mojibake) - all Spanish chars now display correctly
+  - ADDED: Stripe payment links integrated into Phase 2/3/4 payment screens
+  - ADDED: Phase 4 payment flow (€100 filing fee) with m_pay4, paid4 handlers
+  - ADDED: /approve4 and /ready admin commands for Phase 4 management
+  - ADDED: expediente_ready field for Phase 4 eligibility
+  - ADDED: PostgreSQL support for Railway (persistent DB via DATABASE_URL)
+  - ADDED: Re-engagement reminders (24h, 72h, 1week) via job queue
+  - ADDED: Database type shown in /stats output
+  - UPDATED: All database functions support both PostgreSQL and SQLite
+
 v5.1.0 (2026-02-05)
   - FULL AUDIT + CONVERSION OPTIMIZATION:
   - FIXED: fq_ callbacks from eligibility screen (broken button did nothing)
@@ -2324,6 +2336,115 @@ async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 
 # =============================================================================
+# RE-ENGAGEMENT REMINDERS (Job Queue)
+# =============================================================================
+
+def get_users_for_reminder(hours_since_update: int, phase_filter: str = None) -> List[Dict]:
+    """Get users who haven't interacted in X hours and haven't paid phase2 yet."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+
+    if USE_POSTGRES:
+        query = f"""
+            SELECT telegram_id, first_name, country_code
+            FROM users
+            WHERE phase2_paid = 0
+            AND eligible = 1
+            AND updated_at < NOW() - INTERVAL '{hours_since_update} hours'
+            AND updated_at > NOW() - INTERVAL '{hours_since_update + 24} hours'
+        """
+    else:
+        query = f"""
+            SELECT telegram_id, first_name, country_code
+            FROM users
+            WHERE phase2_paid = 0
+            AND eligible = 1
+            AND updated_at < datetime('now', '-{hours_since_update} hours')
+            AND updated_at > datetime('now', '-{hours_since_update + 24} hours')
+        """
+
+    c.execute(query)
+    rows = c.fetchall()
+    result = [{"telegram_id": r[0], "first_name": r[1], "country_code": r[2]} for r in rows]
+    conn.close()
+    return result
+
+
+async def send_reminder_24h(context: ContextTypes.DEFAULT_TYPE):
+    """Send 24h reminder to users who started but haven't uploaded enough docs."""
+    users = get_users_for_reminder(24)
+    dl = days_left()
+
+    for user in users:
+        try:
+            dc = get_doc_count(user["telegram_id"])
+            if dc < MIN_DOCS_FOR_PHASE2:
+                await context.bot.send_message(
+                    user["telegram_id"],
+                    f"Hola {user['first_name']},\n\n"
+                    f"Vimos que comenzó su proceso de regularización pero aún no ha subido todos sus documentos.\n\n"
+                    f"📄 Documentos subidos: {dc}\n"
+                    f"📋 Mínimo recomendado: {MIN_DOCS_FOR_PHASE2}\n"
+                    f"⏰ Días restantes: {dl}\n\n"
+                    "Cuanto antes suba su documentación, antes podremos revisarla y asegurar que todo esté correcto.\n\n"
+                    "Escriba /menu para continuar.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                logger.info(f"24h reminder sent to {user['telegram_id']}")
+        except Exception as e:
+            logger.warning(f"Failed to send 24h reminder to {user['telegram_id']}: {e}")
+
+
+async def send_reminder_72h(context: ContextTypes.DEFAULT_TYPE):
+    """Send 72h reminder with urgency."""
+    users = get_users_for_reminder(72)
+    dl = days_left()
+
+    for user in users:
+        try:
+            dc = get_doc_count(user["telegram_id"])
+            if dc < MIN_DOCS_FOR_PHASE2:
+                await context.bot.send_message(
+                    user["telegram_id"],
+                    f"Hola {user['first_name']},\n\n"
+                    f"Han pasado 3 días desde que inició su proceso. El plazo de regularización cierra en *{dl} días*.\n\n"
+                    "No pierda esta oportunidad única de regularizar su situación. "
+                    "Más de 500 personas ya han completado su documentación con nosotros.\n\n"
+                    "Recuerde: todo lo que haga en esta fase es *gratuito*. "
+                    "Solo le pediremos un pago cuando hayamos revisado su caso.\n\n"
+                    "Escriba /menu para retomar su proceso.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                logger.info(f"72h reminder sent to {user['telegram_id']}")
+        except Exception as e:
+            logger.warning(f"Failed to send 72h reminder to {user['telegram_id']}: {e}")
+
+
+async def send_reminder_1week(context: ContextTypes.DEFAULT_TYPE):
+    """Send 1 week reminder - last chance."""
+    users = get_users_for_reminder(168)  # 7 days * 24 hours
+    dl = days_left()
+
+    for user in users:
+        try:
+            await context.bot.send_message(
+                user["telegram_id"],
+                f"Hola {user['first_name']},\n\n"
+                f"Ha pasado una semana desde que comenzó su proceso de regularización.\n\n"
+                f"⚠️ *Solo quedan {dl} días* para presentar su solicitud.\n\n"
+                "Entendemos que puede tener dudas o dificultades. "
+                "Nuestro equipo está disponible para ayudarle en cada paso.\n\n"
+                "Si necesita hablar con alguien, escriba /menu y pulse *Hablar con nuestro equipo*.\n\n"
+                "No deje pasar esta oportunidad histórica.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.info(f"1week reminder sent to {user['telegram_id']}")
+        except Exception as e:
+            logger.warning(f"Failed to send 1week reminder to {user['telegram_id']}: {e}")
+
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -2397,8 +2518,17 @@ def main():
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
 
-    logger.info("PH-Bot v5.1.0 starting")
+    # Schedule re-engagement reminders (runs every 6 hours)
+    job_queue = app.job_queue
+    if job_queue:
+        job_queue.run_repeating(send_reminder_24h, interval=timedelta(hours=6), first=timedelta(minutes=5))
+        job_queue.run_repeating(send_reminder_72h, interval=timedelta(hours=6), first=timedelta(minutes=10))
+        job_queue.run_repeating(send_reminder_1week, interval=timedelta(hours=6), first=timedelta(minutes=15))
+        logger.info("Re-engagement reminders scheduled (24h, 72h, 1week)")
+
+    logger.info("PH-Bot v5.2.0 starting")
     logger.info(f"Payment: FREE > €47 > €150 > €100 | Days left: {days_left()}")
+    logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
