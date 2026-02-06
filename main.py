@@ -1543,13 +1543,29 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    delete_user(update.effective_user.id)
-    ctx.user_data.clear()  # Clear conversation context
-    await update.message.reply_text(
-        "✅ Su cuenta ha sido eliminada completamente.\n\n"
-        "Todos sus datos, documentos y progreso han sido borrados.\n"
-        "Escriba /start para comenzar de nuevo."
-    )
+    """Reset user account completely - delete all data and end conversation."""
+    tid = update.effective_user.id
+    logger.info(f"RESET requested by user {tid}")
+
+    # Delete from database
+    delete_user(tid)
+
+    # Clear ALL context data
+    ctx.user_data.clear()
+    if hasattr(ctx, 'chat_data') and ctx.chat_data:
+        ctx.chat_data.clear()
+
+    # Send confirmation
+    try:
+        await update.message.reply_text(
+            "✅ Su cuenta ha sido eliminada completamente.\n\n"
+            "Todos sus datos, documentos y progreso han sido borrados.\n"
+            "Escriba /start para comenzar de nuevo."
+        )
+    except Exception as e:
+        logger.error(f"Error sending reset confirmation: {e}")
+
+    logger.info(f"RESET completed for user {tid}")
     return ConversationHandler.END
 
 
@@ -2609,36 +2625,82 @@ def main():
             CommandHandler("reset", cmd_reset),
         ],
         states={
-            ST_COUNTRY: [CallbackQueryHandler(handle_country, pattern="^c_")],
-            ST_Q1_DATE: [CallbackQueryHandler(handle_q1)],
-            ST_Q2_TIME: [CallbackQueryHandler(handle_q2)],
-            ST_Q3_RECORD: [CallbackQueryHandler(handle_q3)],
-            ST_ELIGIBLE: [CallbackQueryHandler(handle_menu)],
-            ST_NOT_ELIGIBLE: [CallbackQueryHandler(handle_menu)],
-            ST_SERVICE_INFO: [CallbackQueryHandler(handle_menu)],
-            ST_FAQ_MENU: [CallbackQueryHandler(handle_faq_menu)],
-            ST_FAQ_ITEM: [CallbackQueryHandler(handle_faq_menu)],
+            ST_COUNTRY: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_country, pattern="^c_"),
+            ],
+            ST_Q1_DATE: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_q1),
+            ],
+            ST_Q2_TIME: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_q2),
+            ],
+            ST_Q3_RECORD: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_q3),
+            ],
+            ST_ELIGIBLE: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_menu),
+            ],
+            ST_NOT_ELIGIBLE: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_menu),
+            ],
+            ST_SERVICE_INFO: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_menu),
+            ],
+            ST_FAQ_MENU: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_faq_menu),
+            ],
+            ST_FAQ_ITEM: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_faq_menu),
+            ],
             ST_MAIN_MENU: [
+                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text),
                 MessageHandler(filters.PHOTO, handle_photo_upload),
                 MessageHandler(filters.Document.ALL, handle_file_upload),
             ],
-            ST_DOCS_LIST: [CallbackQueryHandler(handle_menu)],
-            ST_UPLOAD_SELECT: [CallbackQueryHandler(handle_menu)],
+            ST_DOCS_LIST: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_menu),
+            ],
+            ST_UPLOAD_SELECT: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_menu),
+            ],
             ST_UPLOAD_PHOTO: [
+                CommandHandler("reset", cmd_reset),
                 MessageHandler(filters.PHOTO, handle_photo_upload),
                 MessageHandler(filters.Document.ALL, handle_file_upload),
                 CallbackQueryHandler(handle_menu),
             ],
-            ST_PAY_PHASE2: [CallbackQueryHandler(handle_menu)],
-            ST_PAY_PHASE3: [CallbackQueryHandler(handle_menu)],
-            ST_PAY_PHASE4: [CallbackQueryHandler(handle_menu)],
+            ST_PAY_PHASE2: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_menu),
+            ],
+            ST_PAY_PHASE3: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_menu),
+            ],
+            ST_PAY_PHASE4: [
+                CommandHandler("reset", cmd_reset),
+                CallbackQueryHandler(handle_menu),
+            ],
             ST_CONTACT: [
+                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text),
             ],
             ST_HUMAN_MSG: [
+                CommandHandler("reset", cmd_reset),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_human_msg),
                 CallbackQueryHandler(handle_menu),
             ],
