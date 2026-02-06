@@ -1301,6 +1301,61 @@ def days_left() -> int:
     return max(0, (DEADLINE - datetime.now()).days)
 
 
+def get_country_checklist(country_code: str) -> str:
+    """Generate a country-specific document checklist."""
+    country = COUNTRIES.get(country_code, COUNTRIES["other"])
+    name = country.get("name", "su país")
+    hague = country.get("hague", False)
+
+    # Base documents everyone needs
+    checklist = [
+        "🪪 *Pasaporte vigente*",
+        "   Original + copia de todas las páginas con sellos",
+        "",
+        "📜 *Certificado de antecedentes penales* de " + name,
+    ]
+
+    # Country-specific antecedentes info
+    if country.get("antecedentes_online"):
+        checklist.append(f"   🌐 Puede obtenerlo online: {country.get('antecedentes_url', 'consulte la web oficial')}")
+    else:
+        checklist.append("   ⚠️ Requiere gestión presencial o mediante contacto local")
+
+    if hague:
+        checklist.append("   📌 Debe estar *apostillado* (Convenio de La Haya)")
+    else:
+        checklist.append("   📌 Debe estar *legalizado* por el consulado español (no Apostilla)")
+
+    checklist.extend([
+        "",
+        "📍 *Certificado de empadronamiento*",
+        "   Solícitelo en su ayuntamiento (algunos permiten hacerlo online)",
+        "   Debe tener menos de 3 meses de antigüedad",
+        "",
+        "📷 *2 fotografías tamaño carnet*",
+        "   Fondo blanco, recientes",
+        "",
+        "🏠 *Pruebas de residencia continuada en España*",
+        "   Al menos 3 documentos que demuestren su presencia:",
+        "   • Facturas de luz/agua/gas (Endesa, Iberdrola, Naturgy)",
+        "   • Extractos bancarios (CaixaBank, Sabadell, BBVA, N26, Revolut)",
+        "   • Contrato de alquiler o recibos de alquiler",
+        "   • Facturas de teléfono (Vodafone, Movistar, Orange)",
+        "   • Billetes de transporte con su nombre (Renfe, Alsa)",
+        "   • Historial de pedidos (Glovo, Deliveroo, Just Eat)",
+        "   • Recibos médicos o de farmacia",
+        "",
+    ])
+
+    # Country-specific antecedentes price note
+    price = country.get("antecedentes_price", 89)
+    if price:
+        checklist.append(f"💡 *Servicio opcional:* Gestionamos sus antecedentes de {name} por €{price}")
+        checklist.append("   (Incluye apostilla/legalización y traducción jurada si es necesario)")
+
+    return "\n".join(checklist)
+
+
 def phase_name(user: Dict) -> str:
     if user.get("phase4_paid"): return "Fase 4 — Presentación"
     if user.get("phase3_paid"): return "Fase 3 — Procesamiento"
@@ -1343,6 +1398,7 @@ def doc_type_kb() -> InlineKeyboardMarkup:
 def main_menu_kb(user: Dict) -> InlineKeyboardMarkup:
     dc = get_doc_count(user["telegram_id"])
     btns = [
+        [InlineKeyboardButton("📋 Mi checklist de documentos", callback_data="m_checklist")],
         [InlineKeyboardButton(f"📄 Mis documentos ({dc})", callback_data="m_docs")],
         [InlineKeyboardButton("📤 Subir documento", callback_data="m_upload")],
     ]
@@ -1682,6 +1738,22 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                     [InlineKeyboardButton("Menú principal", callback_data="back")],
                 ]))
             return ST_FAQ_ITEM
+        return ST_MAIN_MENU
+
+    if d == "m_checklist":
+        country_code = user.get("country_code", "other")
+        country = COUNTRIES.get(country_code, COUNTRIES["other"])
+        checklist = get_country_checklist(country_code)
+
+        await q.edit_message_text(
+            f"*Checklist de documentos para {country['flag']} {country['name']}*\n\n"
+            f"{checklist}",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📤 Subir documento", callback_data="m_upload")],
+                [InlineKeyboardButton("📄 Ver mis documentos", callback_data="m_docs")],
+                [InlineKeyboardButton("← Volver al menú", callback_data="back")],
+            ]))
         return ST_MAIN_MENU
 
     if d == "m_docs":
