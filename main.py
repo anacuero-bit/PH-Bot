@@ -12,7 +12,7 @@ v5.2.0 (2026-02-06)
   - INFRASTRUCTURE & FEATURES:
   - FIXED: UTF-8 encoding corruption (mojibake) - all Spanish chars now display correctly
   - ADDED: Stripe payment links integrated into Phase 2/3/4 payment screens
-  - ADDED: Phase 4 payment flow (€100 filing fee) with m_pay4, paid4 handlers
+  - ADDED: Phase 4 payment flow (€110 filing fee) with m_pay4, paid4 handlers
   - ADDED: /approve4 and /ready admin commands for Phase 4 management
   - ADDED: expediente_ready field for Phase 4 eligibility
   - ADDED: PostgreSQL support for Railway (persistent DB via DATABASE_URL)
@@ -70,7 +70,7 @@ v5.0.0 (2026-02-05)
   - Smart escalation (bot → FAQ → canned → queue → human)
   - Comprehensive FAQ (11 topics vs 6 in v4)
   - Correct payment structure per PAYMENT_STRATEGY.md:
-        Phase 1 FREE → Phase 2 €47 → Phase 3 €150 → Phase 4 €100
+        Phase 1 FREE → Phase 2 €39 → Phase 3 €150 → Phase 4 €110
   - Country-specific antecedentes guidance
   - Message logging database
   - Admin tools: /approve2, /approve3, /reply, /stats, /broadcast
@@ -148,9 +148,9 @@ ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_CHAT_IDS", "").split(
 SUPPORT_PHONE = os.environ.get("SUPPORT_PHONE", "+34 600 000 000")
 BIZUM_PHONE = os.environ.get("BIZUM_PHONE", "+34 600 000 000")
 BANK_IBAN = os.environ.get("BANK_IBAN", "ES00 0000 0000 0000 0000 0000")
-STRIPE_PHASE2_LINK = os.environ.get("STRIPE_PHASE2_LINK", "")  # Stripe payment link for €47
+STRIPE_PHASE2_LINK = os.environ.get("STRIPE_PHASE2_LINK", "")  # Stripe payment link for €39
 STRIPE_PHASE3_LINK = os.environ.get("STRIPE_PHASE3_LINK", "")  # Stripe payment link for €150
-STRIPE_PHASE4_LINK = os.environ.get("STRIPE_PHASE4_LINK", "")  # Stripe payment link for €100
+STRIPE_PHASE4_LINK = os.environ.get("STRIPE_PHASE4_LINK", "")  # Stripe payment link for €110
 
 # Database: Use PostgreSQL if DATABASE_URL is set, otherwise SQLite
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -172,10 +172,10 @@ logger = logging.getLogger("ph-bot")
 
 PRICING = {
     "phase1": 0,       # Free — build trust
-    "phase2": 47,      # After 3+ docs — legal review
+    "phase2": 39,      # After 3+ docs — legal review
     "phase3": 150,     # Docs verified — processing
-    "phase4": 100,     # Filing window opens
-    "total_service": 297,
+    "phase4": 110,     # Filing window opens
+    "total_service": 299,
     "gov_fee": 38.28,
     "tie_card": 16,
 }
@@ -557,13 +557,13 @@ FAQ = {
             "*Nuestras tarifas — sin sorpresas:*\n\n"
             "Fase 1 · Preparación: *Gratuito*\n"
             "  Verificación de elegibilidad, subida de documentos, revisión preliminar.\n\n"
-            "Fase 2 · Revisión legal: *€47*\n"
+            "Fase 2 · Revisión legal: *€39*\n"
             "  Análisis completo, informe detallado, plan personalizado.\n\n"
             "Fase 3 · Procesamiento: *€150*\n"
             "  Expediente legal, formularios, revisión final de abogado.\n\n"
-            "Fase 4 · Presentación: *€100*\n"
+            "Fase 4 · Presentación: *€110*\n"
             "  Presentación oficial, seguimiento hasta resolución.\n\n"
-            "*Total servicio: €297*\n"
+            "*Total servicio: €299*\n"
             "Tasas del gobierno (aparte): €38,28 + ~€16 (TIE).\n\n"
             "A modo de referencia, un abogado generalista cobra entre €500 y €1.000 "
             "por un servicio similar. Las gestorías, entre €300 y €600, pero sin "
@@ -684,7 +684,7 @@ FAQ = {
             "  Sin abogados, sin garantías, pago por adelantado.\n\n"
             "Abogados generalistas: €500-1.000\n"
             "  Sin especialización en extranjería.\n\n"
-            "Pombo & Horowitz: €297 total\n"
+            "Pombo & Horowitz: €299 total\n"
             "  Abogados colegiados especializados.\n"
             "  38 años de experiencia.\n"
             "  Pago progresivo (no todo de golpe).\n"
@@ -1404,11 +1404,11 @@ def main_menu_kb(user: Dict) -> InlineKeyboardMarkup:
     ]
     # Payment progression: Phase 2 → Phase 3 → Phase 4
     if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
-        btns.append([InlineKeyboardButton("🔓 Revisión legal — €47", callback_data="m_pay2")])
+        btns.append([InlineKeyboardButton("🔓 Revisión legal — €39", callback_data="m_pay2")])
     elif user.get("phase2_paid") and not user.get("phase3_paid") and user.get("docs_verified"):
         btns.append([InlineKeyboardButton("🔓 Procesamiento — €150", callback_data="m_pay3")])
     elif user.get("phase3_paid") and not user.get("phase4_paid") and user.get("expediente_ready"):
-        btns.append([InlineKeyboardButton("🔓 Presentación — €100", callback_data="m_pay4")])
+        btns.append([InlineKeyboardButton("🔓 Presentación — €110", callback_data="m_pay4")])
     btns += [
         [InlineKeyboardButton("💰 Costos y pagos", callback_data="m_price")],
         [InlineKeyboardButton("❓ Preguntas frecuentes", callback_data="m_faq")],
@@ -1844,7 +1844,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "m_pay2":
         dc = get_doc_count(update.effective_user.id)
         text = (
-            f"*Revisión legal completa — €47*\n\n"
+            f"*Revisión legal completa — €39*\n\n"
             f"Ha subido {dc} documentos. Con este pago, nuestro equipo realizará:\n\n"
             "• Análisis legal de toda su documentación.\n"
             "• Informe detallado indicando qué está correcto y qué falta.\n"
@@ -1920,7 +1920,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "m_pay4":
         dl = days_left()
         text = (
-            "*Presentación de solicitud — €100*\n\n"
+            "*Presentación de solicitud — €110*\n\n"
             f"Su expediente está listo. Quedan *{dl} días* hasta el cierre del plazo.\n\n"
             "Con este pago final, realizaremos:\n\n"
             "• Presentación telemática oficial ante Extranjería.\n"
@@ -2068,7 +2068,7 @@ async def handle_photo_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) ->
     # Phase 2 unlock message
     unlock = ""
     if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
-        unlock = "\n\nYa puede desbloquear la *revisión legal completa* por €47."
+        unlock = "\n\nYa puede desbloquear la *revisión legal completa* por €39."
 
     await processing_msg.edit_text(
         f"{status_text}\n\n"
@@ -2121,7 +2121,7 @@ async def handle_file_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
 
     unlock = ""
     if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
-        unlock = "\n\nYa puede desbloquear la *revisión legal completa* por €47."
+        unlock = "\n\nYa puede desbloquear la *revisión legal completa* por €39."
 
     await update.message.reply_text(
         f"✅ Documento recibido: {info['name']}\n"
@@ -2379,7 +2379,7 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     c.execute("SELECT COUNT(*) FROM documents"); docs = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM messages WHERE direction='in'"); msgs = c.fetchone()[0]
     conn.close()
-    rev = (p2 * 47) + (p3 * 150) + (p4 * 100)
+    rev = (p2 * 39) + (p3 * 150) + (p4 * 110)
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
     await update.message.reply_text(
         f"*Estadísticas*\n\n"
@@ -2608,7 +2608,7 @@ def main():
         logger.info("Re-engagement reminders scheduled (24h, 72h, 1week)")
 
     logger.info("PH-Bot v5.2.0 starting")
-    logger.info(f"Payment: FREE > €47 > €150 > €100 | Days left: {days_left()}")
+    logger.info(f"Payment: FREE > €39 > €150 > €110 | Days left: {days_left()}")
     logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
