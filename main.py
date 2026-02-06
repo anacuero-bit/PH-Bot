@@ -119,6 +119,14 @@ try:
 except ImportError:
     IMAGE_ANALYSIS = False
 
+# Optional: PostgreSQL (for Railway production)
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    POSTGRES_AVAILABLE = True
+except ImportError:
+    POSTGRES_AVAILABLE = False
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -131,6 +139,10 @@ BANK_IBAN = os.environ.get("BANK_IBAN", "ES00 0000 0000 0000 0000 0000")
 STRIPE_PHASE2_LINK = os.environ.get("STRIPE_PHASE2_LINK", "")  # Stripe payment link for €47
 STRIPE_PHASE3_LINK = os.environ.get("STRIPE_PHASE3_LINK", "")  # Stripe payment link for €150
 STRIPE_PHASE4_LINK = os.environ.get("STRIPE_PHASE4_LINK", "")  # Stripe payment link for €100
+
+# Database: Use PostgreSQL if DATABASE_URL is set, otherwise SQLite
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+USE_POSTGRES = bool(DATABASE_URL) and POSTGRES_AVAILABLE
 
 DEADLINE = datetime(2026, 6, 30, 23, 59, 59)
 DB_PATH = "tuspapeles.db"
@@ -874,170 +886,268 @@ FAQ = {
 # DATABASE
 # =============================================================================
 
+def get_connection():
+    """Get database connection (PostgreSQL if DATABASE_URL set, else SQLite)."""
+    if USE_POSTGRES:
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+
+def db_param(index: int = 1) -> str:
+    """Return the parameter placeholder for the current database."""
+    return "%s" if USE_POSTGRES else "?"
+
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
 
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        telegram_id INTEGER UNIQUE,
-        first_name TEXT,
-        full_name TEXT,
-        phone TEXT,
-        country_code TEXT,
-        eligible INTEGER DEFAULT 0,
-        current_phase INTEGER DEFAULT 1,
-        phase2_paid INTEGER DEFAULT 0,
-        phase3_paid INTEGER DEFAULT 0,
-        phase4_paid INTEGER DEFAULT 0,
-        has_criminal_record INTEGER DEFAULT 0,
-        preliminary_review_sent INTEGER DEFAULT 0,
-        docs_verified INTEGER DEFAULT 0,
-        expediente_ready INTEGER DEFAULT 0,
-        state TEXT DEFAULT 'new',
-        escalation_queue TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )""")
+    if USE_POSTGRES:
+        # PostgreSQL schema
+        c.execute("""CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            telegram_id BIGINT UNIQUE,
+            first_name TEXT,
+            full_name TEXT,
+            phone TEXT,
+            country_code TEXT,
+            eligible INTEGER DEFAULT 0,
+            current_phase INTEGER DEFAULT 1,
+            phase2_paid INTEGER DEFAULT 0,
+            phase3_paid INTEGER DEFAULT 0,
+            phase4_paid INTEGER DEFAULT 0,
+            has_criminal_record INTEGER DEFAULT 0,
+            preliminary_review_sent INTEGER DEFAULT 0,
+            docs_verified INTEGER DEFAULT 0,
+            expediente_ready INTEGER DEFAULT 0,
+            state TEXT DEFAULT 'new',
+            escalation_queue TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
 
-    c.execute("""CREATE TABLE IF NOT EXISTS cases (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        case_number TEXT UNIQUE,
-        status TEXT DEFAULT 'onboarding',
-        progress INTEGER DEFAULT 0,
-        assigned_lawyer TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS cases (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            case_number TEXT UNIQUE,
+            status TEXT DEFAULT 'onboarding',
+            progress INTEGER DEFAULT 0,
+            assigned_lawyer TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
 
-    c.execute("""CREATE TABLE IF NOT EXISTS documents (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        doc_type TEXT,
-        file_id TEXT,
-        ocr_text TEXT,
-        detected_type TEXT,
-        validation_score INTEGER DEFAULT 0,
-        validation_notes TEXT,
-        status TEXT DEFAULT 'pending',
-        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        reviewed_at TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS documents (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            doc_type TEXT,
+            file_id TEXT,
+            ocr_text TEXT,
+            detected_type TEXT,
+            validation_score INTEGER DEFAULT 0,
+            validation_notes TEXT,
+            status TEXT DEFAULT 'pending',
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reviewed_at TIMESTAMP
+        )""")
 
-    c.execute("""CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        direction TEXT,
-        content TEXT,
-        intent TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id)
-    )""")
+        c.execute("""CREATE TABLE IF NOT EXISTS messages (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER REFERENCES users(id),
+            direction TEXT,
+            content TEXT,
+            intent TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        logger.info("Database: PostgreSQL initialized")
+    else:
+        # SQLite schema
+        c.execute("""CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER UNIQUE,
+            first_name TEXT,
+            full_name TEXT,
+            phone TEXT,
+            country_code TEXT,
+            eligible INTEGER DEFAULT 0,
+            current_phase INTEGER DEFAULT 1,
+            phase2_paid INTEGER DEFAULT 0,
+            phase3_paid INTEGER DEFAULT 0,
+            phase4_paid INTEGER DEFAULT 0,
+            has_criminal_record INTEGER DEFAULT 0,
+            preliminary_review_sent INTEGER DEFAULT 0,
+            docs_verified INTEGER DEFAULT 0,
+            expediente_ready INTEGER DEFAULT 0,
+            state TEXT DEFAULT 'new',
+            escalation_queue TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+
+        c.execute("""CREATE TABLE IF NOT EXISTS cases (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            case_number TEXT UNIQUE,
+            status TEXT DEFAULT 'onboarding',
+            progress INTEGER DEFAULT 0,
+            assigned_lawyer TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )""")
+
+        c.execute("""CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            doc_type TEXT,
+            file_id TEXT,
+            ocr_text TEXT,
+            detected_type TEXT,
+            validation_score INTEGER DEFAULT 0,
+            validation_notes TEXT,
+            status TEXT DEFAULT 'pending',
+            uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            reviewed_at TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )""")
+
+        c.execute("""CREATE TABLE IF NOT EXISTS messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            direction TEXT,
+            content TEXT,
+            intent TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )""")
+        logger.info("Database: SQLite initialized")
 
     conn.commit()
     conn.close()
 
 
+def _row_to_dict(row, cursor) -> Optional[Dict]:
+    """Convert a database row to a dictionary."""
+    if row is None:
+        return None
+    if USE_POSTGRES:
+        cols = [desc[0] for desc in cursor.description]
+        return dict(zip(cols, row))
+    return dict(row)
+
+
 def get_user(tid: int) -> Optional[Dict]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE telegram_id = ?", (tid,))
+    p = db_param()
+    c.execute(f"SELECT * FROM users WHERE telegram_id = {p}", (tid,))
     row = c.fetchone()
+    result = _row_to_dict(row, c)
     conn.close()
-    return dict(row) if row else None
+    return result
 
 
 def create_user(tid: int, first_name: str) -> Dict:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (telegram_id, first_name) VALUES (?, ?)", (tid, first_name))
+    p = db_param()
+    if USE_POSTGRES:
+        c.execute(f"INSERT INTO users (telegram_id, first_name) VALUES ({p}, {p}) ON CONFLICT (telegram_id) DO NOTHING", (tid, first_name))
+    else:
+        c.execute(f"INSERT OR IGNORE INTO users (telegram_id, first_name) VALUES ({p}, {p})", (tid, first_name))
     conn.commit()
     conn.close()
     return get_user(tid)
 
 
 def update_user(tid: int, **kw):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
-    fields = ", ".join(f"{k} = ?" for k in kw)
+    p = db_param()
+    fields = ", ".join(f"{k} = {p}" for k in kw)
     vals = list(kw.values()) + [tid]
-    c.execute(f"UPDATE users SET {fields}, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = ?", vals)
+    c.execute(f"UPDATE users SET {fields}, updated_at = CURRENT_TIMESTAMP WHERE telegram_id = {p}", vals)
     conn.commit()
     conn.close()
 
 
 def delete_user(tid: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT id FROM users WHERE telegram_id = ?", (tid,))
+    p = db_param()
+    c.execute(f"SELECT id FROM users WHERE telegram_id = {p}", (tid,))
     row = c.fetchone()
     if row:
         uid = row[0]
-        c.execute("DELETE FROM documents WHERE user_id = ?", (uid,))
-        c.execute("DELETE FROM cases WHERE user_id = ?", (uid,))
-        c.execute("DELETE FROM messages WHERE user_id = ?", (uid,))
-        c.execute("DELETE FROM users WHERE id = ?", (uid,))
+        c.execute(f"DELETE FROM documents WHERE user_id = {p}", (uid,))
+        c.execute(f"DELETE FROM cases WHERE user_id = {p}", (uid,))
+        c.execute(f"DELETE FROM messages WHERE user_id = {p}", (uid,))
+        c.execute(f"DELETE FROM users WHERE id = {p}", (uid,))
     conn.commit()
     conn.close()
 
 
 def get_doc_count(tid: int) -> int:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM documents d JOIN users u ON d.user_id=u.id WHERE u.telegram_id=?", (tid,))
+    p = db_param()
+    c.execute(f"SELECT COUNT(*) FROM documents d JOIN users u ON d.user_id=u.id WHERE u.telegram_id={p}", (tid,))
     n = c.fetchone()[0]
     conn.close()
     return n
 
 
 def get_user_docs(tid: int) -> List[Dict]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT d.* FROM documents d JOIN users u ON d.user_id=u.id WHERE u.telegram_id=? ORDER BY d.uploaded_at DESC", (tid,))
+    p = db_param()
+    c.execute(f"SELECT d.* FROM documents d JOIN users u ON d.user_id=u.id WHERE u.telegram_id={p} ORDER BY d.uploaded_at DESC", (tid,))
     rows = c.fetchall()
+    result = [_row_to_dict(r, c) for r in rows]
     conn.close()
-    return [dict(r) for r in rows]
+    return result
 
 
 def save_document(tid: int, doc_type: str, file_id: str, ocr_text: str = "", detected_type: str = "", score: int = 0, notes: str = ""):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("""INSERT INTO documents (user_id, doc_type, file_id, ocr_text, detected_type, validation_score, validation_notes)
-        SELECT id, ?, ?, ?, ?, ?, ? FROM users WHERE telegram_id = ?""",
+    p = db_param()
+    c.execute(f"""INSERT INTO documents (user_id, doc_type, file_id, ocr_text, detected_type, validation_score, validation_notes)
+        SELECT id, {p}, {p}, {p}, {p}, {p}, {p} FROM users WHERE telegram_id = {p}""",
         (doc_type, file_id, ocr_text, detected_type, score, notes, tid))
     conn.commit()
     conn.close()
 
 
 def save_message(tid: int, direction: str, content: str, intent: str = ""):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("""INSERT INTO messages (user_id, direction, content, intent)
-        SELECT id, ?, ?, ? FROM users WHERE telegram_id = ?""",
+    p = db_param()
+    c.execute(f"""INSERT INTO messages (user_id, direction, content, intent)
+        SELECT id, {p}, {p}, {p} FROM users WHERE telegram_id = {p}""",
         (direction, content[:500], intent, tid))
     conn.commit()
     conn.close()
 
 
 def get_or_create_case(tid: int) -> Dict:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_connection()
     c = conn.cursor()
-    c.execute("SELECT c.* FROM cases c JOIN users u ON c.user_id=u.id WHERE u.telegram_id=?", (tid,))
+    p = db_param()
+    c.execute(f"SELECT c.* FROM cases c JOIN users u ON c.user_id=u.id WHERE u.telegram_id={p}", (tid,))
     case = c.fetchone()
     if not case:
         import random
         cn = f"PH-2026-{random.randint(1000, 9999)}"
-        c.execute("INSERT INTO cases (user_id, case_number) SELECT id, ? FROM users WHERE telegram_id=?", (cn, tid))
+        c.execute(f"INSERT INTO cases (user_id, case_number) SELECT id, {p} FROM users WHERE telegram_id={p}", (cn, tid))
         conn.commit()
-        c.execute("SELECT * FROM cases WHERE case_number=?", (cn,))
+        c.execute(f"SELECT * FROM cases WHERE case_number={p}", (cn,))
         case = c.fetchone()
+    result = _row_to_dict(case, c)
     conn.close()
-    return dict(case)
+    return result
 
 
 # =============================================================================
@@ -2166,7 +2276,7 @@ async def cmd_reply(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_IDS: return
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM users"); total = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM users WHERE eligible=1"); eligible = c.fetchone()[0]
@@ -2177,6 +2287,7 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     c.execute("SELECT COUNT(*) FROM messages WHERE direction='in'"); msgs = c.fetchone()[0]
     conn.close()
     rev = (p2 * 47) + (p3 * 150) + (p4 * 100)
+    db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
     await update.message.reply_text(
         f"*Estadísticas*\n\n"
         f"Usuarios: {total}\n"
@@ -2187,6 +2298,7 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Fase 3 pagados: {p3} (€{p3*150})\n"
         f"Fase 4 pagados: {p4} (€{p4*100})\n"
         f"*Ingresos: €{rev}*\n\n"
+        f"DB: {db_type}\n"
         f"Días restantes: {days_left()}", parse_mode=ParseMode.MARKDOWN)
 
 
@@ -2196,7 +2308,7 @@ async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if not ctx.args:
         await update.message.reply_text("Uso: /broadcast <mensaje>"); return
     msg = " ".join(ctx.args)
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT telegram_id FROM users")
     users = [r[0] for r in c.fetchall()]
