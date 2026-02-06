@@ -1,0 +1,11 @@
+# Railway build configuration
+# Installs Tesseract OCR for document scanning
+
+[phases.setup]
+nixPkgs = ["tesseract", "tesseract-data-spa", "tesseract-data-eng"]
+
+[phases.install]
+cmds = ["pip install -r requirements.txt"]
+
+[start]
+cmd = "python main.py"
