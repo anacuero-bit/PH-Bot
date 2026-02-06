@@ -177,9 +177,10 @@ PRICING = {
     ST_UPLOAD_PHOTO,
     ST_PAY_PHASE2,
     ST_PAY_PHASE3,
+    ST_PAY_PHASE4,
     ST_CONTACT,
     ST_HUMAN_MSG,
-) = range(18)
+) = range(19)
 
 # =============================================================================
 # COUNTRY DATA (no slang greetings — professional tone)
@@ -892,6 +893,7 @@ def init_db():
         has_criminal_record INTEGER DEFAULT 0,
         preliminary_review_sent INTEGER DEFAULT 0,
         docs_verified INTEGER DEFAULT 0,
+        expediente_ready INTEGER DEFAULT 0,
         state TEXT DEFAULT 'new',
         escalation_queue TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1222,10 +1224,13 @@ def main_menu_kb(user: Dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(f"📄 Mis documentos ({dc})", callback_data="m_docs")],
         [InlineKeyboardButton("📤 Subir documento", callback_data="m_upload")],
     ]
+    # Payment progression: Phase 2 → Phase 3 → Phase 4
     if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
         btns.append([InlineKeyboardButton("🔓 Revisión legal — €47", callback_data="m_pay2")])
     elif user.get("phase2_paid") and not user.get("phase3_paid") and user.get("docs_verified"):
         btns.append([InlineKeyboardButton("🔓 Procesamiento — €150", callback_data="m_pay3")])
+    elif user.get("phase3_paid") and not user.get("phase4_paid") and user.get("expediente_ready"):
+        btns.append([InlineKeyboardButton("🔓 Presentación — €100", callback_data="m_pay4")])
     btns += [
         [InlineKeyboardButton("💰 Costos y pagos", callback_data="m_price")],
         [InlineKeyboardButton("❓ Preguntas frecuentes", callback_data="m_faq")],
@@ -1635,24 +1640,28 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
     if d == "m_pay2":
         dc = get_doc_count(update.effective_user.id)
-        await q.edit_message_text(
+        text = (
             f"*Revisión legal completa — €47*\n\n"
             f"Ha subido {dc} documentos. Con este pago, nuestro equipo realizará:\n\n"
-            "- Análisis legal de toda su documentación.\n"
-            "- Informe detallado indicando qué está correcto y qué falta.\n"
-            "- Plan personalizado con plazos.\n"
-            "- Asesoramiento sobre antecedentes penales.\n"
-            "- Canal de soporte prioritario.\n\n"
-            "*Formas de pago:*\n"
-            f"Bizum: {BIZUM_PHONE}\n"
-            f"Transferencia: {BANK_IBAN}\n"
-            "Concepto: su nombre + número de expediente.",
+            "• Análisis legal de toda su documentación.\n"
+            "• Informe detallado indicando qué está correcto y qué falta.\n"
+            "• Plan personalizado con plazos.\n"
+            "• Asesoramiento sobre antecedentes penales.\n"
+            "• Canal de soporte prioritario.\n\n"
+        )
+        if STRIPE_PHASE2_LINK:
+            text += "Pulse *Pagar con tarjeta* para un pago seguro instantáneo."
+        else:
+            text += (
+                "*Formas de pago:*\n"
+                f"Bizum: {BIZUM_PHONE}\n"
+                f"Transferencia: {BANK_IBAN}\n"
+                "Concepto: su nombre + número de expediente."
+            )
+        await q.edit_message_text(
+            text,
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Ya he realizado el pago", callback_data="paid2")],
-                [InlineKeyboardButton("Tengo dudas", callback_data="m_contact")],
-                [InlineKeyboardButton("← Volver", callback_data="back")],
-            ]))
+            reply_markup=_payment_buttons("paid2", STRIPE_PHASE2_LINK))
         return ST_PAY_PHASE2
 
     if d == "paid2":
@@ -1669,23 +1678,27 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     if d == "m_pay3":
-        await q.edit_message_text(
-            f"*Preparación del expediente — €150*\n\n"
+        text = (
+            "*Preparación del expediente — €150*\n\n"
             "Sus documentos han sido verificados. Con este pago, nuestro equipo realizará:\n\n"
-            "- Expediente legal completo.\n"
-            "- Todos los formularios completados y revisados.\n"
-            "- Revisión final por abogado.\n"
-            "- Puesto reservado en cola de presentación.\n\n"
-            "*Formas de pago:*\n"
-            f"Bizum: {BIZUM_PHONE}\n"
-            f"Transferencia: {BANK_IBAN}\n"
-            "Concepto: su nombre + número de expediente.",
+            "• Expediente legal completo.\n"
+            "• Todos los formularios completados y revisados.\n"
+            "• Revisión final por abogado.\n"
+            "• Puesto reservado en cola de presentación.\n\n"
+        )
+        if STRIPE_PHASE3_LINK:
+            text += "Pulse *Pagar con tarjeta* para un pago seguro instantáneo."
+        else:
+            text += (
+                "*Formas de pago:*\n"
+                f"Bizum: {BIZUM_PHONE}\n"
+                f"Transferencia: {BANK_IBAN}\n"
+                "Concepto: su nombre + número de expediente."
+            )
+        await q.edit_message_text(
+            text,
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Ya he realizado el pago", callback_data="paid3")],
-                [InlineKeyboardButton("Tengo dudas", callback_data="m_contact")],
-                [InlineKeyboardButton("← Volver", callback_data="back")],
-            ]))
+            reply_markup=_payment_buttons("paid3", STRIPE_PHASE3_LINK))
         return ST_PAY_PHASE3
 
     if d == "paid3":
@@ -1699,6 +1712,45 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Hemos registrado su notificación de pago.\n\n"
             "Lo verificaremos y comenzaremos la preparación de su expediente. "
             "Recibirá una notificación cuando esté activado.")
+        return ConversationHandler.END
+
+    if d == "m_pay4":
+        dl = days_left()
+        text = (
+            "*Presentación de solicitud — €100*\n\n"
+            f"Su expediente está listo. Quedan *{dl} días* hasta el cierre del plazo.\n\n"
+            "Con este pago final, realizaremos:\n\n"
+            "• Presentación telemática oficial ante Extranjería.\n"
+            "• Seguimiento del estado de su solicitud.\n"
+            "• Notificación inmediata de resolución.\n"
+            "• Asistencia para recogida de TIE.\n\n"
+        )
+        if STRIPE_PHASE4_LINK:
+            text += "Pulse *Pagar con tarjeta* para un pago seguro instantáneo."
+        else:
+            text += (
+                "*Formas de pago:*\n"
+                f"Bizum: {BIZUM_PHONE}\n"
+                f"Transferencia: {BANK_IBAN}\n"
+                "Concepto: su nombre + número de expediente."
+            )
+        await q.edit_message_text(
+            text,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=_payment_buttons("paid4", STRIPE_PHASE4_LINK))
+        return ST_PAY_PHASE4
+
+    if d == "paid4":
+        update_user(update.effective_user.id, state="phase4_pending")
+        await notify_admins(ctx,
+            f"💳 *Pago Fase 4 pendiente*\n"
+            f"Usuario: {user.get('first_name')}\n"
+            f"TID: {update.effective_user.id}\n"
+            f"Aprobar: `/approve4 {update.effective_user.id}`")
+        await q.edit_message_text(
+            "Hemos registrado su notificación de pago.\n\n"
+            "Lo verificaremos y procederemos a presentar su solicitud. "
+            "Recibirá una confirmación con el número de registro.")
         return ConversationHandler.END
 
     if d == "show_bizum":
@@ -2063,6 +2115,40 @@ async def cmd_approve3(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {e}")
 
 
+async def cmd_approve4(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id not in ADMIN_IDS: return
+    if not ctx.args:
+        await update.message.reply_text("Uso: /approve4 <telegram_id>"); return
+    try:
+        tid = int(ctx.args[0])
+        update_user(tid, phase4_paid=1, current_phase=4, state="phase4_active")
+        await ctx.bot.send_message(tid,
+            "Pago de la Fase 4 confirmado.\n\n"
+            "Procederemos a presentar su solicitud ante Extranjería. "
+            "Le enviaremos el número de registro y justificante de presentación.")
+        await update.message.reply_text(f"Fase 4 aprobada para {tid}.")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_ready(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Mark user's expediente as ready for Phase 4: /ready <telegram_id>"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    if not ctx.args:
+        await update.message.reply_text("Uso: /ready <telegram_id>"); return
+    try:
+        tid = int(ctx.args[0])
+        update_user(tid, expediente_ready=1)
+        await ctx.bot.send_message(tid,
+            "Su expediente está completo y listo para presentar.\n\n"
+            "Cuando desee proceder con la presentación oficial, "
+            "acceda a su menú con /menu y pulse el botón de *Presentación*.",
+            parse_mode=ParseMode.MARKDOWN)
+        await update.message.reply_text(f"Expediente marcado como listo para {tid}.")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
 async def cmd_reply(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Admin replies to user: /reply <tid> <message>"""
     if update.effective_user.id not in ADMIN_IDS: return
@@ -2086,10 +2172,11 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     c.execute("SELECT COUNT(*) FROM users WHERE eligible=1"); eligible = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM users WHERE phase2_paid=1"); p2 = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM users WHERE phase3_paid=1"); p3 = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE phase4_paid=1"); p4 = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM documents"); docs = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM messages WHERE direction='in'"); msgs = c.fetchone()[0]
     conn.close()
-    rev = (p2 * 47) + (p3 * 150)
+    rev = (p2 * 47) + (p3 * 150) + (p4 * 100)
     await update.message.reply_text(
         f"*Estadísticas*\n\n"
         f"Usuarios: {total}\n"
@@ -2098,6 +2185,7 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Mensajes recibidos: {msgs}\n\n"
         f"Fase 2 pagados: {p2} (€{p2*47})\n"
         f"Fase 3 pagados: {p3} (€{p3*150})\n"
+        f"Fase 4 pagados: {p4} (€{p4*100})\n"
         f"*Ingresos: €{rev}*\n\n"
         f"Días restantes: {days_left()}", parse_mode=ParseMode.MARKDOWN)
 
@@ -2166,6 +2254,7 @@ def main():
             ],
             ST_PAY_PHASE2: [CallbackQueryHandler(handle_menu)],
             ST_PAY_PHASE3: [CallbackQueryHandler(handle_menu)],
+            ST_PAY_PHASE4: [CallbackQueryHandler(handle_menu)],
             ST_CONTACT: [
                 CallbackQueryHandler(handle_menu),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text),
@@ -2190,6 +2279,8 @@ def main():
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("approve2", cmd_approve2))
     app.add_handler(CommandHandler("approve3", cmd_approve3))
+    app.add_handler(CommandHandler("approve4", cmd_approve4))
+    app.add_handler(CommandHandler("ready", cmd_ready))
     app.add_handler(CommandHandler("reply", cmd_reply))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
