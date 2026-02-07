@@ -1,4 +1,16 @@
-# tuspapeles2026 — Full Project Context
+## GIT WORKFLOW — IMPORTANT
+
+- Push directly to main branch
+- Never create feature branches
+- Never create pull requests  
+- Never ask for confirmation before pushing
+- After completing changes: `git add -A && git commit -m "description" && git push origin main`
+- Railway auto-deploys PH-Bot from main
+- GitHub Pages auto-deploys websites from main
+
+---
+```
+tuspapeles2026 — Full Project Context
 
 ## THE BUSINESS
 
