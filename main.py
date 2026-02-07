@@ -2851,6 +2851,20 @@ async def handle_file_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
 async def handle_free_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle any text that isn't a button press."""
     text = update.message.text or ""
+
+    # Catch commands that somehow got through
+    if text.startswith("/"):
+        if text.lower().startswith("/reset"):
+            return await cmd_reset(update, ctx)
+        elif text.lower().startswith("/start"):
+            return await cmd_start(update, ctx)
+        elif text.lower().startswith("/menu"):
+            return await cmd_menu(update, ctx)
+        elif text.lower().startswith("/referidos"):
+            return await cmd_referidos(update, ctx)
+        # Unknown command - ignore
+        return ST_MAIN_MENU
+
     user = get_user(update.effective_user.id)
     if not user:
         user = create_user(update.effective_user.id, update.effective_user.first_name or "Usuario")
