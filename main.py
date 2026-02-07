@@ -2455,43 +2455,104 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ST_HUMAN_MSG
 
     if d == "m_pay2":
-        dc = get_doc_count(update.effective_user.id)
-        text = (
-            f"*Revisión legal completa — €39*\n\n"
-            f"Ha subido {dc} documentos. Con este pago, nuestro equipo realizará:\n\n"
-            "• Análisis legal de toda su documentación.\n"
-            "• Informe detallado indicando qué está correcto y qué falta.\n"
-            "• Plan personalizado con plazos.\n"
-            "• Asesoramiento sobre antecedentes penales.\n"
-            "• Canal de soporte prioritario.\n\n"
-        )
-        if STRIPE_PHASE2_LINK:
-            text += "Pulse *Pagar con tarjeta* para un pago seguro instantáneo."
+        tid = update.effective_user.id
+        dc = get_doc_count(tid)
+        base_price = 39  # Phase 2 price
+
+        # Check friend discount
+        friend_disc = get_friend_discount(tid)
+        discount = friend_disc['amount'] if friend_disc['has_discount'] else 0
+
+        # Check referral credits
+        price_after_discount = base_price - discount
+        credit_calc = apply_credits_to_payment(tid, price_after_discount)
+
+        final_price = credit_calc['final_price']
+
+        # Store for payment confirmation
+        ctx.user_data['payment_discount'] = discount
+        ctx.user_data['payment_credits'] = credit_calc['credits_applied']
+        ctx.user_data['payment_final'] = final_price
+
+        # Build price breakdown (simple math)
+        lines = [f"*Revisión legal completa*\n"]
+        lines.append(f"Precio: €{base_price}")
+
+        if discount > 0:
+            lines.append(f"Descuento amigo: -€{discount}")
+
+        if credit_calc['credits_applied'] > 0:
+            lines.append(f"Tu crédito: -€{credit_calc['credits_applied']}")
+
+        lines.append(f"*Total: €{final_price}*\n")
+
+        if final_price <= 0:
+            lines.append("Esta fase es gratis gracias a tus referidos.")
+            if credit_calc['credits_remaining'] > 0:
+                lines.append(f"Crédito restante: €{credit_calc['credits_remaining']}")
+
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Continuar gratis", callback_data="paid2_free")],
+                [InlineKeyboardButton("Volver", callback_data="m_menu")],
+            ])
         else:
-            text += (
-                "*Formas de pago:*\n"
-                f"Bizum: {BIZUM_PHONE}\n"
-                f"Transferencia: {BANK_IBAN}\n"
-                "Concepto: su nombre + número de expediente."
-            )
+            lines.append(f"Ha subido {dc} documentos. Con este pago:\n")
+            lines.append("• Análisis legal de su documentación.")
+            lines.append("• Informe de qué está correcto y qué falta.")
+            lines.append("• Plan personalizado con plazos.")
+
+            kb = _payment_buttons("paid2", STRIPE_PHASE2_LINK)
+
         await q.edit_message_text(
-            text,
+            "\n".join(lines),
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=_payment_buttons("paid2", STRIPE_PHASE2_LINK))
+            reply_markup=kb)
         return ST_PAY_PHASE2
 
-    if d == "paid2":
-        update_user(update.effective_user.id, state="phase2_pending")
+    if d == "paid2" or d == "paid2_free":
+        tid = update.effective_user.id
+
+        # Apply discounts
+        discount = ctx.user_data.get('payment_discount', 0)
+        credits_used = ctx.user_data.get('payment_credits', 0)
+
+        if discount > 0:
+            apply_friend_discount(tid)
+
+        if credits_used > 0:
+            mark_credits_used(tid, credits_used)
+
+        # Update user status
+        update_user(tid, phase2_paid=1, current_phase=2, state="phase2_active")
+
+        # Credit the referrer
+        result = credit_referrer(tid, 39)
+
+        if result.get('credited'):
+            # Minimal notification to referrer
+            try:
+                user = get_user(tid)
+                await ctx.bot.send_message(
+                    result['referrer_id'],
+                    f"Tu amigo {user.get('first_name', 'alguien')} usó tu código. +€{result['amount']} crédito.",
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify referrer: {e}")
+
+        # Notify admins
         await notify_admins(ctx,
-            f"💳 *Pago Fase 2 pendiente*\n"
-            f"Usuario: {user.get('first_name')}\n"
-            f"TID: {update.effective_user.id}\n"
-            f"Aprobar: `/approve2 {update.effective_user.id}`")
+            f"Pago Fase 2: User {tid}\n"
+            f"Descuento: €{discount} | Créditos: €{credits_used}")
+
         await q.edit_message_text(
-            "Hemos registrado su notificación de pago.\n\n"
-            "Lo verificaremos y le confirmaremos el acceso a la revisión legal. "
-            "Recibirá una notificación cuando esté activado.")
-        return ConversationHandler.END
+            "Pago recibido.\n\n"
+            "Nuestro equipo revisará su documentación en las próximas 24-48 horas.\n"
+            "Le notificaremos cuando esté listo para la siguiente fase.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Ver mi progreso", callback_data="m_menu")]
+            ]),
+        )
+        return ST_MAIN_MENU
 
     if d == "m_pay3":
         text = (
@@ -3203,8 +3264,14 @@ def main():
             CommandHandler("start", cmd_start),
             CommandHandler("menu", cmd_menu),
             CommandHandler("reset", cmd_reset),
+            CommandHandler("referidos", cmd_referidos),
         ],
         states={
+            ST_ENTER_REFERRAL_CODE: [
+                CommandHandler("reset", cmd_reset),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_referral_code_text),
+                CallbackQueryHandler(handle_referral_callbacks, pattern="^ref_"),
+            ],
             ST_COUNTRY: [
                 CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_country, pattern="^c_"),
@@ -3298,6 +3365,7 @@ def main():
 
     app.add_handler(conv)
     app.add_handler(CommandHandler("reset", cmd_reset))
+    app.add_handler(CommandHandler("referidos", cmd_referidos))
     app.add_handler(CommandHandler("approve2", cmd_approve2))
     app.add_handler(CommandHandler("approve3", cmd_approve3))
     app.add_handler(CommandHandler("approve4", cmd_approve4))
