@@ -2566,8 +2566,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Nuestro equipo revisará su documentación en las próximas 24-48 horas.\n"
             "Le notificaremos cuando esté listo para la siguiente fase.\n\n"
             f"✓ Tu código de referido está activo: `{code}`\n\n"
-            "Ahora ganas €25 de crédito por cada amigo que pague usando tu código. "
-            "Con 12 amigos, tu servicio es gratis.",
+            "Ahora ganas €25 de crédito por cada amigo que pague usando tu código.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📱 Compartir por WhatsApp", url=wa_url)],
