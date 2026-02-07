@@ -3666,7 +3666,8 @@ def main():
         job_queue.run_repeating(send_reminder_1week, interval=timedelta(hours=6), first=timedelta(minutes=15))
         logger.info("Re-engagement reminders scheduled (24h, 72h, 1week)")
 
-    logger.info("PH-Bot v5.2.0 starting")
+    logger.info("PH-Bot v5.2.1 starting")
+    logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
     logger.info(f"Payment: FREE > €39 > €150 > €110 | Days left: {days_left()}")
     logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
