@@ -1560,6 +1560,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Reset user account completely - delete all data and end conversation."""
     tid = update.effective_user.id
+    chat_id = update.effective_chat.id
     logger.info(f"RESET requested by user {tid}")
 
     # Delete from database
@@ -1570,15 +1571,25 @@ async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if hasattr(ctx, 'chat_data') and ctx.chat_data:
         ctx.chat_data.clear()
 
-    # Send confirmation
+    # Send confirmation (handle both message and callback scenarios)
+    confirmation = (
+        "✅ Su cuenta ha sido eliminada completamente.\n\n"
+        "Todos sus datos, documentos y progreso han sido borrados.\n"
+        "Escriba /start para comenzar de nuevo."
+    )
     try:
-        await update.message.reply_text(
-            "✅ Su cuenta ha sido eliminada completamente.\n\n"
-            "Todos sus datos, documentos y progreso han sido borrados.\n"
-            "Escriba /start para comenzar de nuevo."
-        )
+        if update.message:
+            await update.message.reply_text(confirmation)
+        else:
+            # Fallback: send directly to chat
+            await ctx.bot.send_message(chat_id=chat_id, text=confirmation)
     except Exception as e:
         logger.error(f"Error sending reset confirmation: {e}")
+        # Last resort: try sending directly
+        try:
+            await ctx.bot.send_message(chat_id=chat_id, text=confirmation)
+        except Exception as e2:
+            logger.error(f"Fallback send also failed: {e2}")
 
     logger.info(f"RESET completed for user {tid}")
     return ConversationHandler.END
