@@ -152,9 +152,24 @@ STRIPE_PHASE2_LINK = os.environ.get("STRIPE_PHASE2_LINK", "")  # Stripe payment 
 STRIPE_PHASE3_LINK = os.environ.get("STRIPE_PHASE3_LINK", "")  # Stripe payment link for €150
 STRIPE_PHASE4_LINK = os.environ.get("STRIPE_PHASE4_LINK", "")  # Stripe payment link for €110
 
-# Database: Use PostgreSQL if DATABASE_URL is set, otherwise SQLite
+# Database: Use PostgreSQL if DATABASE_URL is set and connection works, otherwise SQLite
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
-USE_POSTGRES = bool(DATABASE_URL) and POSTGRES_AVAILABLE
+USE_POSTGRES = False  # Will be set to True after successful connection test
+
+def _test_postgres_connection() -> bool:
+    """Test if PostgreSQL connection works."""
+    if not DATABASE_URL or not POSTGRES_AVAILABLE:
+        return False
+    try:
+        import psycopg2
+        conn = psycopg2.connect(DATABASE_URL, connect_timeout=5)
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"PostgreSQL connection failed, falling back to SQLite: {e}")
+        return False
+
+USE_POSTGRES = _test_postgres_connection()
 
 DEADLINE = datetime(2026, 6, 30, 23, 59, 59)
 DB_PATH = "tuspapeles.db"
