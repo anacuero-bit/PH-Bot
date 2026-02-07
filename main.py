@@ -1625,6 +1625,18 @@ def mark_credits_used(user_id: int, amount: float):
     conn.close()
 
 
+def get_whatsapp_share_url(code: str) -> str:
+    """Generate WhatsApp share URL with referral code."""
+    import urllib.parse
+    text = (
+        f"¡Hola! Verifiqué que califico para la regularización 2026 en España.\n\n"
+        f"Si llevas tiempo aquí sin papeles, verifica gratis si calificas:\n"
+        f"👉 tuspapeles2026.es\n\n"
+        f"Usa mi código {code} y te descuentan €25."
+    )
+    return f"https://wa.me/?text={urllib.parse.quote(text)}"
+
+
 # =============================================================================
 # DOCUMENT PROCESSING
 # =============================================================================
@@ -2253,8 +2265,8 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "Presentación: 100% online.\n\n"
         "El siguiente paso es preparar su documentación. "
         "Puede empezar ahora mismo — es completamente gratuito.\n\n"
-        f"Tu código personal: `{code}`\n"
-        "Si conoces a alguien en tu situación, puede usarlo para €25 de descuento.",
+        f"Tu código: `{code}`\n"
+        "Tus amigos reciben €25 de descuento. Cuando pagues tu primera fase, tú también ganas €25 por cada amigo.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Ver qué documentos necesito", callback_data="fq_pruebas_residencia")],
@@ -2531,10 +2543,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         if result.get('credited'):
             # Minimal notification to referrer
             try:
-                user = get_user(tid)
+                user_data = get_user(tid)
                 await ctx.bot.send_message(
                     result['referrer_id'],
-                    f"Tu amigo {user.get('first_name', 'alguien')} usó tu código. +€{result['amount']} crédito.",
+                    f"Tu amigo {user_data.get('first_name', 'alguien')} usó tu código. +€{result['amount']} crédito.",
                 )
             except Exception as e:
                 logger.error(f"Failed to notify referrer: {e}")
@@ -2544,11 +2556,21 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"Pago Fase 2: User {tid}\n"
             f"Descuento: €{discount} | Créditos: €{credits_used}")
 
+        # Get user's referral code for activation message
+        user = get_user(tid)
+        code = user.get('referral_code', '')
+        wa_url = get_whatsapp_share_url(code)
+
         await q.edit_message_text(
             "Pago recibido.\n\n"
             "Nuestro equipo revisará su documentación en las próximas 24-48 horas.\n"
-            "Le notificaremos cuando esté listo para la siguiente fase.",
+            "Le notificaremos cuando esté listo para la siguiente fase.\n\n"
+            f"✓ Tu código de referido está activo: `{code}`\n\n"
+            "Ahora ganas €25 de crédito por cada amigo que pague usando tu código. "
+            "Con 12 amigos, tu servicio es gratis.",
+            parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📱 Compartir por WhatsApp", url=wa_url)],
                 [InlineKeyboardButton("Ver mi progreso", callback_data="m_menu")]
             ]),
         )
