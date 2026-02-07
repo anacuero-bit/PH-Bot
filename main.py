@@ -1,13 +1,27 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v5.3.1 — Client Intake & Case Management
+PH-Bot v5.4.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
-Updated:    2026-02-07
+Updated:    2026-02-08
 
 CHANGELOG:
 ----------
+v5.4.0 (2026-02-08)
+  - EXPANDED COUNTRIES: 25 countries (was 9) with verified antecedentes info
+  - ADDED: /antecedentes command — country-specific criminal record instructions
+  - ADDED: Country-specific antecedentes info in NLU (criminal_cert intent)
+  - UPDATED: Country keyboard — 5x5 flag grid for top non-EU nationalities in Spain
+  - UPDATED: Referidos screen — PAID vs UNPAID templates with full explanation
+  - UPDATED: Share buttons — WhatsApp, Telegram, Facebook, Copy for IG/TikTok
+  - UPDATED: Share URLs use tuspapeles2026.es/r.html?code= referral landing page
+  - UPDATED: copy_ref_ handler sends copyable text for Instagram/TikTok sharing
+  - UPDATED: Pricing FAQ — comprehensive breakdown with govt fees, phases, discounts
+  - UPDATED: Antecedentes FAQ references /antecedentes for country-specific info
+  - REMOVED: Broken antecedentes_url links from COUNTRIES dict
+  - REMOVED: antecedentes_price upsell (replaced with /antecedentes command)
+
 v5.3.1 (2026-02-07)
   - BUGFIXES:
   - FIXED: AI confidence always showing 0% - improved JSON parsing with:
@@ -288,73 +302,342 @@ REFERRAL_FRIEND_DISCOUNT = 25    # €25 off for friend
 # =============================================================================
 
 COUNTRIES = {
+    "ma": {
+        "name": "Marruecos", "flag": "🇲🇦", "demonym": "marroquí",
+        "antecedentes_online": False,
+        "hague": False,
+        "antecedentes_info": (
+            "🇲🇦 *Antecedentes Penales - Marruecos*\n\n"
+            "⚠️ *No existe trámite 100% online*\n\n"
+            "*Desde España:*\n"
+            "Solicitar a través del Consulado de Marruecos.\n"
+            "Requiere: pasaporte, justificante de domicilio.\n"
+            "Tiempo: varias semanas.\n\n"
+            "*Desde Marruecos:*\n"
+            "Ministerio de Justicia o comisaría de policía.\n\n"
+            "*Requisitos adicionales:*\n"
+            "• Apostilla de La Haya (en Marruecos)\n"
+            "• Traducción jurada árabe→español (en España)\n\n"
+            "💡 Planifica con antelación - este trámite tarda."
+        ),
+    },
     "co": {
         "name": "Colombia", "flag": "🇨🇴", "demonym": "colombiano/a",
-        "antecedentes_url": "https://antecedentes.policia.gov.co",
         "antecedentes_online": True,
-        "antecedentes_price": 35,
-        "apostille_info": "Apostilla electrónica disponible en cancilleria.gov.co",
         "hague": True,
+        "antecedentes_info": (
+            "🇨🇴 *Antecedentes Penales - Colombia*\n\n"
+            "*Opción 1: Constancia (sin apostilla)*\n"
+            "Trámite gratuito a través de la Cancillería colombiana.\n"
+            "Busca: 'Constancia antecedentes judiciales Cancillería Colombia'\n\n"
+            "*Opción 2: Certificado con Apostilla*\n"
+            "Requiere pago (~36,000 COP). Se tramita en:\n"
+            "tramites.cancilleria.gov.co → Apostilla y Legalización\n\n"
+            "⚠️ Consulta con el Consulado de Colombia en tu ciudad para confirmar el proceso actual."
+        ),
     },
     "ve": {
         "name": "Venezuela", "flag": "🇻🇪", "demonym": "venezolano/a",
-        "antecedentes_url": "https://tramites.ministeriopublico.gob.ve",
-        "antecedentes_online": False,
-        "antecedentes_price": 59,
-        "apostille_info": "Sistema frecuentemente caído. Recomendamos gestión profesional.",
+        "antecedentes_online": True,
         "hague": True,
+        "antecedentes_info": (
+            "🇻🇪 *Antecedentes Penales - Venezuela*\n\n"
+            "*Paso 1: Obtener certificado*\n"
+            "Ministerio del Interior (MPPRIJP)\n"
+            "certificacioninternacional.mijp.gob.ve\n\n"
+            "*Paso 2: Apostilla electrónica*\n"
+            "Sistema SLAE del MPPRE\n"
+            "legalizacionve.mppre.gob.ve\n\n"
+            "✅ Trámite 100% online y gratuito.\n"
+            "📧 Recibes ambos documentos por email.\n\n"
+            "⚠️ Los sistemas pueden tener mantenimiento. Si no funcionan, intenta otro día."
+        ),
     },
     "pe": {
         "name": "Perú", "flag": "🇵🇪", "demonym": "peruano/a",
-        "antecedentes_url": "https://portal.policia.gob.pe/antecedentes_policiales/",
         "antecedentes_online": True,
-        "antecedentes_price": 45,
-        "apostille_info": "Apostilla en Relaciones Exteriores. Puede tardar 2-3 semanas.",
         "hague": True,
+        "antecedentes_info": (
+            "🇵🇪 *Antecedentes Penales - Perú*\n\n"
+            "*Opción 1: Online (recomendada)*\n"
+            "1. Pagar en pagalo.pe\n"
+            "2. Solicitar en cape.pj.gob.pe\n"
+            "3. Apostillar en serviciosalciudadano.rree.gob.pe\n\n"
+            "*Opción 2: Consulado*\n"
+            "Solicitar cita en el Consulado de Perú más cercano.\n"
+            "Luego legalizar en el MAEC de España.\n\n"
+            "📅 Validez: 90 días desde emisión."
+        ),
     },
     "ec": {
         "name": "Ecuador", "flag": "🇪🇨", "demonym": "ecuatoriano/a",
-        "antecedentes_url": "https://certificados.ministeriodelinterior.gob.ec",
         "antecedentes_online": True,
-        "antecedentes_price": 35,
-        "apostille_info": "Apostilla electrónica disponible.",
         "hague": True,
+        "antecedentes_info": (
+            "🇪🇨 *Antecedentes Penales - Ecuador*\n\n"
+            "*Paso 1: Obtener certificado (GRATIS)*\n"
+            "certificados.ministeriodelinterior.gob.ec\n"
+            "→ Sección Antecedentes Penales\n\n"
+            "*Paso 2: Apostilla*\n"
+            "Sistema electrónico de Cancillería Ecuador\n"
+            "Costo: ~$30 USD\n\n"
+            "También puedes apostillar en el Consulado de Ecuador en Madrid "
+            "(sin cita, lunes/miércoles/jueves 8:30-10:00).\n\n"
+            "📅 Validez: 90 días."
+        ),
+    },
+    "ar": {
+        "name": "Argentina", "flag": "🇦🇷", "demonym": "argentino/a",
+        "antecedentes_online": True,
+        "hague": True,
+        "antecedentes_info": (
+            "🇦🇷 *Antecedentes Penales - Argentina*\n\n"
+            "*Online:*\n"
+            "Registro Nacional de Reincidencia\n"
+            "www.dnrec.jus.gov.ar\n\n"
+            "*Apostilla:*\n"
+            "Sistema de apostilla electrónica de Cancillería Argentina\n\n"
+            "📅 Validez: 90 días."
+        ),
+    },
+    "cn": {
+        "name": "China", "flag": "🇨🇳", "demonym": "chino/a",
+        "antecedentes_online": False,
+        "hague": False,
+        "antecedentes_info": (
+            "🇨🇳 *Antecedentes Penales - China*\n\n"
+            "Solicitar a través de la Embajada/Consulado de China.\n\n"
+            "⚠️ Proceso puede ser largo y complejo.\n"
+            "Requiere legalización consular (China no es parte del Convenio de La Haya).\n\n"
+            "💡 Inicia este trámite lo antes posible."
+        ),
+    },
+    "ua": {
+        "name": "Ucrania", "flag": "🇺🇦", "demonym": "ucraniano/a",
+        "antecedentes_online": False,
+        "hague": True,
+        "antecedentes_info": (
+            "🇺🇦 *Antecedentes Penales - Ucrania*\n\n"
+            "Solicitar a través del Consulado de Ucrania.\n\n"
+            "⚠️ Debido a la situación actual, pueden haber retrasos.\n"
+            "Consulta con el consulado ucraniano para opciones alternativas.\n\n"
+            "Requiere apostilla."
+        ),
     },
     "hn": {
         "name": "Honduras", "flag": "🇭🇳", "demonym": "hondureño/a",
         "antecedentes_online": False,
-        "antecedentes_price": 79,
-        "apostille_info": "Requiere gestión presencial o mediante contacto local.",
         "hague": True,
+        "antecedentes_info": (
+            "🇭🇳 *Antecedentes Penales - Honduras*\n\n"
+            "Solicitar a través del Consulado de Honduras.\n"
+            "O mediante poder a familiar en Honduras.\n\n"
+            "Requiere apostilla y traducción si está en español.\n\n"
+            "💡 Contacta el consulado hondureño más cercano para instrucciones actualizadas."
+        ),
+    },
+    "do": {
+        "name": "Rep. Dominicana", "flag": "🇩🇴", "demonym": "dominicano/a",
+        "antecedentes_online": True,
+        "hague": True,
+        "antecedentes_info": (
+            "🇩🇴 *Antecedentes Penales - Rep. Dominicana*\n\n"
+            "*Online:*\n"
+            "Procuraduría General de la República\n"
+            "pgr.gob.do → Servicios → Certificaciones\n\n"
+            "*Apostilla:*\n"
+            "Cancillería dominicana o consulado.\n\n"
+            "💡 Confirma requisitos actuales con el consulado."
+        ),
+    },
+    "pk": {
+        "name": "Pakistán", "flag": "🇵🇰", "demonym": "pakistaní",
+        "antecedentes_online": False,
+        "hague": False,
+        "antecedentes_info": (
+            "🇵🇰 *Antecedentes Penales - Pakistán*\n\n"
+            "Solicitar a través de la Embajada de Pakistán.\n\n"
+            "Requiere legalización (Pakistán no es parte del Convenio de La Haya).\n\n"
+            "💡 Inicia este trámite con antelación."
+        ),
     },
     "bo": {
         "name": "Bolivia", "flag": "🇧🇴", "demonym": "boliviano/a",
         "antecedentes_online": False,
-        "antecedentes_price": 79,
-        "apostille_info": "Apostilla en Cancillería. Proceso presencial.",
         "hague": True,
+        "antecedentes_info": (
+            "🇧🇴 *Antecedentes Penales - Bolivia*\n\n"
+            "Solicitar a través del Consulado de Bolivia.\n"
+            "O REJAP (Registro de Antecedentes Penales) en Bolivia.\n\n"
+            "Requiere apostilla.\n\n"
+            "💡 Contacta el consulado boliviano para instrucciones."
+        ),
     },
-    "ar": {
-        "name": "Argentina", "flag": "🇦🇷", "demonym": "argentino/a",
-        "antecedentes_url": "https://www.dnrec.jus.gov.ar",
+    "br": {
+        "name": "Brasil", "flag": "🇧🇷", "demonym": "brasileño/a",
         "antecedentes_online": True,
-        "antecedentes_price": 45,
-        "apostille_info": "Apostilla electrónica disponible.",
         "hague": True,
+        "antecedentes_info": (
+            "🇧🇷 *Antecedentes Penales - Brasil*\n\n"
+            "*Federal (online):*\n"
+            "Policía Federal: servicos.dpf.gov.br\n\n"
+            "*Estadual:*\n"
+            "Varía según estado de origen.\n\n"
+            "*Apostilla:*\n"
+            "Sistema e-Apostila de Cancillería brasileña.\n\n"
+            "📅 Validez: 90 días."
+        ),
     },
-    "ma": {
-        "name": "Marruecos", "flag": "🇲🇦", "demonym": "marroquí",
+    "py": {
+        "name": "Paraguay", "flag": "🇵🇾", "demonym": "paraguayo/a",
         "antecedentes_online": False,
-        "antecedentes_price": 79,
-        "apostille_info": "Requiere legalización (no Apostilla — no es miembro del Convenio de La Haya). Legalización consular.",
+        "hague": True,
+        "antecedentes_info": (
+            "🇵🇾 *Antecedentes Penales - Paraguay*\n\n"
+            "Solicitar a través del Consulado de Paraguay.\n"
+            "O Policía Nacional de Paraguay.\n\n"
+            "Requiere apostilla.\n\n"
+            "💡 Contacta el consulado paraguayo para instrucciones."
+        ),
+    },
+    "ni": {
+        "name": "Nicaragua", "flag": "🇳🇮", "demonym": "nicaragüense",
+        "antecedentes_online": False,
+        "hague": True,
+        "antecedentes_info": (
+            "🇳🇮 *Antecedentes Penales - Nicaragua*\n\n"
+            "Solicitar a través del Consulado de Nicaragua.\n"
+            "O Policía Nacional de Nicaragua.\n\n"
+            "Requiere apostilla.\n\n"
+            "💡 Contacta el consulado nicaragüense para instrucciones."
+        ),
+    },
+    "cu": {
+        "name": "Cuba", "flag": "🇨🇺", "demonym": "cubano/a",
+        "antecedentes_online": False,
         "hague": False,
+        "antecedentes_info": (
+            "🇨🇺 *Antecedentes Penales - Cuba*\n\n"
+            "Solicitar a través del Consulado de Cuba.\n\n"
+            "⚠️ Cuba no es parte del Convenio de La Haya.\n"
+            "Requiere legalización consular.\n\n"
+            "💡 Este trámite puede tardar - inicia pronto."
+        ),
+    },
+    "ng": {
+        "name": "Nigeria", "flag": "🇳🇬", "demonym": "nigeriano/a",
+        "antecedentes_online": False,
+        "hague": False,
+        "antecedentes_info": (
+            "🇳🇬 *Antecedentes Penales - Nigeria*\n\n"
+            "Solicitar a través de la Embajada de Nigeria.\n"
+            "O Nigeria Police Force.\n\n"
+            "⚠️ Nigeria no es parte del Convenio de La Haya.\n"
+            "Requiere legalización consular.\n\n"
+            "💡 Inicia este trámite con mucha antelación."
+        ),
+    },
+    "sn": {
+        "name": "Senegal", "flag": "🇸🇳", "demonym": "senegalés/a",
+        "antecedentes_online": False,
+        "hague": True,
+        "antecedentes_info": (
+            "🇸🇳 *Antecedentes Penales - Senegal*\n\n"
+            "Solicitar a través de la Embajada de Senegal.\n\n"
+            "Requiere apostilla (Senegal es parte del Convenio de La Haya desde 2023).\n\n"
+            "💡 Contacta la embajada senegalesa para instrucciones."
+        ),
+    },
+    "gt": {
+        "name": "Guatemala", "flag": "🇬🇹", "demonym": "guatemalteco/a",
+        "antecedentes_online": True,
+        "hague": True,
+        "antecedentes_info": (
+            "🇬🇹 *Antecedentes Penales - Guatemala*\n\n"
+            "*Online:*\n"
+            "Ministerio de Gobernación\n"
+            "antecedentespoliciacos.gob.gt\n\n"
+            "*Apostilla:*\n"
+            "Ministerio de Relaciones Exteriores de Guatemala.\n\n"
+            "💡 Confirma proceso actual con el consulado."
+        ),
+    },
+    "sv": {
+        "name": "El Salvador", "flag": "🇸🇻", "demonym": "salvadoreño/a",
+        "antecedentes_online": True,
+        "hague": True,
+        "antecedentes_info": (
+            "🇸🇻 *Antecedentes Penales - El Salvador*\n\n"
+            "*Online:*\n"
+            "Portal de servicios PNC\n\n"
+            "*Apostilla:*\n"
+            "Cancillería salvadoreña.\n\n"
+            "💡 Confirma proceso actual con el consulado."
+        ),
+    },
+    "in": {
+        "name": "India", "flag": "🇮🇳", "demonym": "indio/a",
+        "antecedentes_online": False,
+        "hague": True,
+        "antecedentes_info": (
+            "🇮🇳 *Antecedentes Penales - India*\n\n"
+            "Police Clearance Certificate (PCC)\n"
+            "Solicitar a través de la Embajada de India.\n\n"
+            "Requiere apostilla.\n\n"
+            "💡 Este trámite puede tardar varias semanas."
+        ),
+    },
+    "bd": {
+        "name": "Bangladesh", "flag": "🇧🇩", "demonym": "bangladesí",
+        "antecedentes_online": False,
+        "hague": False,
+        "antecedentes_info": (
+            "🇧🇩 *Antecedentes Penales - Bangladesh*\n\n"
+            "Solicitar a través de la Embajada de Bangladesh.\n\n"
+            "⚠️ Bangladesh no es parte del Convenio de La Haya.\n"
+            "Requiere legalización consular.\n\n"
+            "💡 Inicia este trámite con mucha antelación."
+        ),
+    },
+    "ph": {
+        "name": "Filipinas", "flag": "🇵🇭", "demonym": "filipino/a",
+        "antecedentes_online": True,
+        "hague": True,
+        "antecedentes_info": (
+            "🇵🇭 *Antecedentes Penales - Filipinas*\n\n"
+            "*NBI Clearance online:*\n"
+            "clearance.nbi.gov.ph\n\n"
+            "*Apostilla:*\n"
+            "Department of Foreign Affairs (DFA) de Filipinas.\n\n"
+            "💡 Confirma proceso actual con el consulado."
+        ),
+    },
+    "gh": {
+        "name": "Ghana", "flag": "🇬🇭", "demonym": "ghanés/a",
+        "antecedentes_online": False,
+        "hague": True,
+        "antecedentes_info": (
+            "🇬🇭 *Antecedentes Penales - Ghana*\n\n"
+            "Solicitar a través de la Embajada de Ghana.\n"
+            "O Ghana Police Service.\n\n"
+            "Requiere apostilla.\n\n"
+            "💡 Contacta la embajada ghanesa para instrucciones."
+        ),
     },
     "other": {
         "name": "Otro país", "flag": "🌍", "demonym": "",
         "antecedentes_online": False,
-        "antecedentes_price": 89,
-        "apostille_info": "Consulte con nuestro equipo para su caso específico.",
         "hague": False,
+        "antecedentes_info": (
+            "🌐 *Antecedentes Penales - Otros países*\n\n"
+            "Para países no listados:\n\n"
+            "1. Contacta la Embajada o Consulado de tu país en España\n"
+            "2. Pregunta por el proceso de certificado de antecedentes penales\n"
+            "3. Confirma si tu país es parte del Convenio de La Haya (apostilla) "
+            "o requiere legalización consular\n\n"
+            "⚠️ Algunos países tardan MESES en emitir estos documentos.\n"
+            "💡 Inicia este trámite lo antes posible."
+        ),
     },
 }
 
@@ -766,13 +1049,21 @@ FAQ = {
     },
     "certificado_antecedentes": {
         "title": "¿Necesito certificado de mi país?",
-        "keywords": ["certificado antecedentes", "apostilla", "legalizado", "traducido"],
+        "keywords": ["certificado antecedentes", "apostilla", "legalizado", "traducido",
+                     "obtener antecedentes", "cómo consigo", "pedir antecedentes"],
         "text": (
             "*¿Necesito certificado de antecedentes de mi país?*\n\n"
             "Sí. Necesitas certificado de antecedentes penales de tu país de origen, "
-            "debidamente *legalizado o apostillado* y traducido si no está en español. "
-            "Algunos países permiten solicitarlo online a través del consulado.\n\n"
-            "Solicítalo *YA* — los consulados se saturarán cerca de abril."
+            "debidamente *legalizado o apostillado* y traducido si no está en español.\n\n"
+            "Solicítalo *YA* — los consulados se saturarán cerca de abril.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📌 *IMPORTANTE*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "• El certificado debe tener menos de 3 meses de antigüedad\n"
+            "• Debe estar apostillado o legalizado\n"
+            "• Si está en otro idioma, necesita traducción jurada en España\n\n"
+            "Usa /antecedentes para ver instrucciones específicas para tu país.\n\n"
+            "¿Tienes dudas? Escríbenos y te ayudamos."
         ),
     },
     "antecedentes_dificil": {
@@ -980,33 +1271,65 @@ FAQ = {
         "keywords": ["precio", "cuesta", "cuánto cuesta", "tarifa", "caro", "barato",
                      "dinero", "costo", "tasas", "modelo 790", "gobierno"],
         "text": (
-            "*¿Cuánto cuesta la regularización?*\n\n"
-            "*Nuestro servicio (€297 total):*\n"
-            "Se paga en 4 fases para que no tengas que pagar todo de golpe:\n\n"
-            "🆓 *Fase 1 — Gratis*\n"
-            "Verificación de elegibilidad + subida de tus primeros documentos. "
-            "Sin compromiso.\n\n"
-            "💳 *Fase 2 — €47*\n"
-            "Revisión legal de tus documentos por un abogado. "
-            "Se desbloquea cuando subes 3+ documentos.\n\n"
-            "💳 *Fase 3 — €150*\n"
-            "Preparación completa de tu expediente. "
-            "Nuestro equipo organiza, valida y prepara todo para presentar.\n\n"
-            "💳 *Fase 4 — €100*\n"
-            "Presentación telemática ante el Gobierno + seguimiento "
-            "hasta la resolución.\n\n"
-            "*Tasas del Gobierno (aparte):*\n"
-            "📋 Modelo 790-052 (solicitud): ~€16\n"
-            "📋 Modelo 790-012 (TIE): ~€16\n"
-            "📋 Tasa de huella dactilar: ~€6\n"
-            "Total tasas gobierno: *~€38*\n\n"
-            "*Costo total estimado: ~€335* (servicio + gobierno)\n\n"
-            "💡 *¿Por qué en fases?*\n"
-            "Para que empieces gratis, veas el valor del servicio, "
-            "y solo pagues cuando estés seguro. Sin letra pequeña.\n\n"
-            "🎁 *Descuentos:*\n"
-            "Invita amigos con tu código y gana €25 por cada uno. "
-            "Con 12 amigos, ¡tu servicio es gratis!"
+            "💰 *¿Cuánto Cuesta la Regularización?*\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🏛️ TASAS DEL GOBIERNO\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "El gobierno español cobra tasas administrativas:\n\n"
+            "• *Tasa 790-052* (tramitación): ~€16-20\n"
+            "  Para procesar tu solicitud de residencia\n\n"
+            "• *Tasa 790-012* (TIE): ~€16-21\n"
+            "  Para expedir tu Tarjeta de Identidad de Extranjero\n\n"
+            "• Certificado antecedentes España: ~€3.86\n\n"
+            "*Total tasas gobierno: aproximadamente €40-50*\n\n"
+            "Estas tasas se pagan directamente al gobierno cuando presentes tu solicitud. "
+            "Nosotros te guiamos en cómo y cuándo pagarlas.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📋 NUESTRO SERVICIO\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Servicio completo de gestión: *€299 en fases*\n\n"
+            "📌 *Fase 1 — GRATIS*\n"
+            "• Verificación de elegibilidad\n"
+            "• Subida de documentos\n"
+            "• Revisión inicial\n\n"
+            "📌 *Fase 2 — €39*\n"
+            "• Revisión legal completa por abogado\n"
+            "• Verificación de cada documento\n"
+            "• Identificación de documentos faltantes\n"
+            "• Recomendaciones personalizadas\n\n"
+            "📌 *Fase 3 — €150*\n"
+            "• Preparación profesional del expediente\n"
+            "• Redacción de escritos legales\n"
+            "• Organización según requisitos oficiales\n"
+            "• Revisión final pre-presentación\n\n"
+            "📌 *Fase 4 — €110*\n"
+            "• Presentación telemática de tu solicitud\n"
+            "• Seguimiento del expediente\n"
+            "• Notificación de resolución\n"
+            "• Asistencia post-aprobación\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🛡️ ¿POR QUÉ EN FASES?\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Dividimos el pago en fases para tu protección:\n\n"
+            "✅ Solo pagas por lo que necesitas\n"
+            "✅ Puedes pausar en cualquier momento\n"
+            "✅ Sin compromisos de pago total\n"
+            "✅ Transparencia total en cada paso\n\n"
+            "No pedimos el pago completo por adelantado porque queremos que "
+            "confíes en nosotros paso a paso.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🎁 DESCUENTOS\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "• €25 si usas el código de un amigo\n"
+            "• Hasta €299 en créditos por referir amigos\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ IMPORTANTE\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "En 2005, el *10-20% de solicitudes fueron DENEGADAS*, muchas por errores "
+            "evitables en la documentación. Un expediente mal preparado puede costarte "
+            "esta oportunidad única.\n\n"
+            "Nuestro equipo de abogados especializados revisa cada detalle para "
+            "maximizar tus posibilidades de aprobación."
         ),
     },
     "por_que_pagar": {
@@ -2166,113 +2489,124 @@ def mark_credits_used(user_id: int, amount: float):
     conn.close()
 
 
+def get_share_text(code: str) -> str:
+    """Standard share message text for all platforms."""
+    return (
+        f"¡Hola! 👋 Te comparto mi código para la regularización 2026 en España. "
+        f"Con el código {code} tienes €25 de descuento. Es 100% online y muy fácil. "
+        f"👉 tuspapeles2026.es/r.html?code={code}"
+    )
+
+
 def get_whatsapp_share_url(code: str) -> str:
     """Generate WhatsApp share URL with referral code."""
     import urllib.parse
-    text = (
-        f"¡Hola! Verifiqué que califico para la regularización 2026 en España.\n\n"
-        f"Si llevas tiempo aquí sin papeles, verifica gratis si calificas:\n"
-        f"👉 tuspapeles2026.es\n\n"
-        f"Usa mi código {code} y te descuentan €25."
-    )
-    return f"https://wa.me/?text={urllib.parse.quote(text)}"
+    return f"https://wa.me/?text={urllib.parse.quote(get_share_text(code))}"
 
 
 def get_telegram_share_url(code: str) -> str:
     """Generate Telegram share URL with referral code."""
     import urllib.parse
-    text = (
-        f"¡Hola! Verifiqué que califico para la regularización 2026 en España.\n\n"
-        f"Si llevas tiempo aquí sin papeles, verifica gratis si calificas:\n"
-        f"👉 tuspapeles2026.es\n\n"
-        f"Usa mi código {code} y te descuentan €25."
+    return (
+        f"https://t.me/share/url?"
+        f"url={urllib.parse.quote(f'https://t.me/TusPapeles2026Bot?start={code}')}"
+        f"&text={urllib.parse.quote('Usa mi código para €25 de descuento')}"
     )
-    return f"https://t.me/share/url?url=https://tuspapeles2026.es&text={urllib.parse.quote(text)}"
 
 
-def get_facebook_share_url() -> str:
-    """Generate Facebook share URL."""
+def get_facebook_share_url(code: str) -> str:
+    """Generate Facebook share URL with referral link."""
     import urllib.parse
-    return f"https://www.facebook.com/sharer/sharer.php?u={urllib.parse.quote('https://tuspapeles2026.es')}"
+    return f"https://www.facebook.com/sharer/sharer.php?u={urllib.parse.quote(f'https://tuspapeles2026.es/r.html?code={code}')}"
+
+
+def referral_share_keyboard(code: str) -> InlineKeyboardMarkup:
+    """Generate share buttons for multiple platforms."""
+    wa_url = get_whatsapp_share_url(code)
+    tg_url = get_telegram_share_url(code)
+    fb_url = get_facebook_share_url(code)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📱 WhatsApp", url=wa_url),
+         InlineKeyboardButton("📲 Telegram", url=tg_url)],
+        [InlineKeyboardButton("📘 Facebook", url=fb_url),
+         InlineKeyboardButton("📋 Copiar", callback_data=f"copy_ref_{code}")],
+        [InlineKeyboardButton("← Volver", callback_data="back")],
+    ])
 
 
 def get_share_buttons(code: str) -> list:
-    """Generate social media share buttons for referral code."""
+    """Generate social media share button rows (without back button)."""
     wa_url = get_whatsapp_share_url(code)
     tg_url = get_telegram_share_url(code)
-    fb_url = get_facebook_share_url()
+    fb_url = get_facebook_share_url(code)
     return [
         [InlineKeyboardButton("📱 WhatsApp", url=wa_url),
-         InlineKeyboardButton("✈️ Telegram", url=tg_url)],
-        [InlineKeyboardButton("📘 Facebook", url=fb_url)],
-        [InlineKeyboardButton("📋 Copiar código", callback_data=f"copy_code_{code}")],
+         InlineKeyboardButton("📲 Telegram", url=tg_url)],
+        [InlineKeyboardButton("📘 Facebook", url=fb_url),
+         InlineKeyboardButton("📋 Copiar", callback_data=f"copy_ref_{code}")],
     ]
 
 
 def build_referidos_text(stats: dict) -> str:
-    """Build the comprehensive referidos screen text."""
+    """Build the comprehensive referidos screen text — different for paid vs unpaid."""
     code = stats['code']
     count = stats['count']
-    credits_earned = stats['credits_earned']
-    credits_available = stats['credits_available']
+    earned = stats['credits_earned']
+    used = stats['credits_used']
+    available = stats['credits_available']
     can_earn = stats['can_earn']
 
-    # Activation status
+    stats_block = (
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 TUS ESTADÍSTICAS\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"Amigos referidos: {count}\n"
+        f"Crédito ganado: €{earned}\n"
+        f"Crédito usado: €{used}\n"
+        f"Crédito disponible: €{available}"
+    )
+
+    how_block = (
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "💡 ¿CÓMO FUNCIONA?\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "1️⃣ *COMPARTE* tu código con amigos que necesiten regularizarse\n\n"
+        "2️⃣ *ELLOS RECIBEN* €25 de descuento en su primer pago\n\n"
+        "3️⃣ *TÚ GANAS* €25 de crédito por cada amigo que pague"
+    )
+
     if can_earn:
-        activation = "✅ *Tu código está activo*"
-    else:
-        activation = (
-            "⏳ *Tu código se activa al pagar la Fase 2 (€39)*\n"
-            "Una vez activo, ganarás €25 por cada amigo que pague."
-        )
-
-    # Progress toward free service
-    if credits_earned >= REFERRAL_CREDIT_CAP:
-        progress_msg = "🎉 *¡Servicio completamente gratis!* Has alcanzado el máximo de créditos."
-    elif credits_earned > 0:
-        remaining = REFERRAL_CREDIT_CAP - credits_earned
-        friends_needed = max(1, remaining // REFERRAL_CREDIT_AMOUNT)
-        progress_msg = (
-            f"📊 *Progreso:* €{credits_earned} de €{REFERRAL_CREDIT_CAP}\n"
-            f"Te faltan {friends_needed} amigos más para servicio gratis."
+        activation_block = (
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "✅ TU CÓDIGO ESTÁ *ACTIVO*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Cada vez que un amigo pague usando tu código, ganas €25 de crédito "
+            "que se aplica automáticamente a tus próximos pagos.\n\n"
+            "🎯 *Con 12 amigos = tu servicio completo es GRATIS*\n\n"
+            "¡Comparte ahora!"
         )
     else:
-        friends_for_free = REFERRAL_CREDIT_CAP // REFERRAL_CREDIT_AMOUNT
-        progress_msg = (
-            f"💡 Invita a {friends_for_free} amigos y tu servicio es *completamente gratis*."
+        activation_block = (
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🔓 ACTIVAR TUS GANANCIAS\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Para empezar a ganar créditos, primero debes pagar tu Fase 2 (€39).\n\n"
+            "*¿Por qué?* Queremos asegurar que solo usuarios comprometidos con el "
+            "proceso puedan ganar créditos. Esto evita fraudes y garantiza un sistema "
+            "justo para todos.\n\n"
+            "Una vez pagues tu €39:\n"
+            "• Tu código se activa permanentemente\n"
+            "• Empiezas a ganar €25 por cada amigo que pague\n"
+            "• Puedes acumular hasta €299 en créditos (¡servicio completo gratis!)\n\n"
+            "🎯 *Con 12 amigos = tu servicio completo es GRATIS*"
         )
-
-    # Referral list
-    ref_list = ""
-    if stats['referrals']:
-        ref_list = "\n👥 *Tus referidos:*\n"
-        for r in stats['referrals'][:10]:
-            if r.get('status') != 'registered':
-                icon = "✅"
-                credit_text = f" → +€{r.get('credit_amount', 0)}"
-            else:
-                icon = "⏳"
-                credit_text = " (pendiente de pago)"
-            name = r.get('referred_name', 'Usuario')
-            ref_list += f"{icon} {name}{credit_text}\n"
-    elif can_earn:
-        ref_list = "\n_Aún no tienes referidos. ¡Comparte tu código!_"
 
     text = (
-        f"👥 *Programa de Referidos*\n\n"
-        f"{activation}\n\n"
-        f"🔑 Tu código: `{code}`\n\n"
-        f"*¿Cómo funciona?*\n"
-        f"1️⃣ Comparte tu código con amigos\n"
-        f"2️⃣ Ellos verifican gratis si califican\n"
-        f"3️⃣ Cuando paguen, tú recibes *€{REFERRAL_CREDIT_AMOUNT} de crédito*\n\n"
-        f"*Tus estadísticas:*\n"
-        f"👥 Referidos que pagaron: {count}\n"
-        f"💰 Crédito ganado: €{credits_earned}\n"
-        f"💳 Crédito disponible: €{credits_available}\n\n"
-        f"{progress_msg}"
-        f"{ref_list}\n\n"
-        f"👇 *Comparte por tu red favorita:*"
+        f"👥 *Tus Referidos*\n\n"
+        f"Tu código personal: `{code}`\n\n"
+        f"{stats_block}\n\n"
+        f"{how_block}\n\n"
+        f"{activation_block}"
     )
     return text
 
@@ -2403,9 +2737,9 @@ def get_country_checklist(country_code: str) -> str:
 
     # Country-specific antecedentes info
     if country.get("antecedentes_online"):
-        checklist.append(f"   🌐 Puede obtenerlo online: {country.get('antecedentes_url', 'consulte la web oficial')}")
+        checklist.append("   🌐 Puede obtenerlo online (use /antecedentes para más detalles)")
     else:
-        checklist.append("   ⚠️ Requiere gestión presencial o mediante contacto local")
+        checklist.append("   ⚠️ Requiere gestión presencial o mediante consulado (use /antecedentes)")
 
     if hague:
         checklist.append("   📌 Debe estar *apostillado* (Convenio de La Haya)")
@@ -2433,11 +2767,9 @@ def get_country_checklist(country_code: str) -> str:
         "",
     ])
 
-    # Country-specific antecedentes price note
-    price = country.get("antecedentes_price", 89)
-    if price:
-        checklist.append(f"💡 *Servicio opcional:* Gestionamos sus antecedentes de {name} por €{price}")
-        checklist.append("   (Incluye apostilla/legalización y traducción jurada si es necesario)")
+    # Country-specific antecedentes note
+    checklist.append(f"💡 Usa /antecedentes para ver instrucciones específicas de {name}")
+    checklist.append("   (Incluye apostilla/legalización y traducción jurada si es necesario)")
 
     return "\n".join(checklist)
 
@@ -2477,14 +2809,21 @@ def phase_status(user: Dict, doc_count: int) -> str:
 
 
 def country_kb() -> InlineKeyboardMarkup:
+    """Generate country selection keyboard — top 25 non-EU nationalities in Spain."""
+    countries_order = [
+        "ma", "co", "ve", "pe", "ec",   # Row 1: Top 5
+        "ar", "cn", "ua", "hn", "do",   # Row 2: 6-10
+        "pk", "bo", "br", "py", "ni",   # Row 3: 11-15
+        "cu", "ng", "sn", "gt", "sv",   # Row 4: 16-20
+        "in", "bd", "ph", "gh", "other", # Row 5: 21-25 + Other
+    ]
     rows = []
-    row = []
-    for code, d in COUNTRIES.items():
-        row.append(InlineKeyboardButton(f"{d['flag']} {d['name']}", callback_data=f"c_{code}"))
-        if len(row) == 2:
-            rows.append(row)
-            row = []
-    if row:
+    for i in range(0, len(countries_order), 5):
+        row = []
+        for code in countries_order[i:i + 5]:
+            c = COUNTRIES[code]
+            row.append(InlineKeyboardButton(
+                f"{c['flag']}", callback_data=f"c_{code}"))
         rows.append(row)
     return InlineKeyboardMarkup(rows)
 
@@ -2790,7 +3129,8 @@ async def handle_country(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     update_user(update.effective_user.id, country_code=code)
 
     await q.edit_message_text(
-        f"Gracias. Hemos registrado su nacionalidad: {country['flag']} {country['name']}.\n\n"
+        f"✅ Registrado: {country['flag']} *{country['name']}*\n\n"
+        "Continuemos con la verificación de requisitos...\n\n"
         "¿Cómo te llamas? Escribe tu nombre completo:",
         parse_mode=ParseMode.MARKDOWN,
     )
@@ -3214,9 +3554,14 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         )
         return ST_MAIN_MENU
 
-    if d.startswith("copy_code_"):
-        code = d[len("copy_code_"):]
-        await q.answer(f"Tu código: {code} — compártelo con tus amigos", show_alert=True)
+    if d.startswith("copy_ref_"):
+        code = d[len("copy_ref_"):]
+        copy_text = f"🇪🇸 ¿Necesitas regularizarte en España? Usa mi código {code} para €25 de descuento en tuspapeles2026.es"
+        await q.answer("Texto copiado — pégalo en Instagram o TikTok", show_alert=True)
+        await q.message.reply_text(
+            f"📋 *Copia este texto:*\n\n`{copy_text}`",
+            parse_mode=ParseMode.MARKDOWN,
+        )
         return ST_MAIN_MENU
 
     if d == "m_faq":
@@ -3339,19 +3684,18 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         # Get user's referral code for activation message
         user = get_user(tid)
         code = user.get('referral_code', '')
-        wa_url = get_whatsapp_share_url(code)
+        share_btns = get_share_buttons(code)
 
         await q.edit_message_text(
             "Pago recibido.\n\n"
             "Nuestro equipo revisará su documentación en las próximas 24-48 horas.\n"
             "Le notificaremos cuando esté listo para la siguiente fase.\n\n"
-            f"Tu código está activo: `{code}`\n"
+            f"✅ Tu código está activo: `{code}`\n"
             "Ganas €25 de crédito por cada amigo que pague.",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📱 Compartir por WhatsApp", url=wa_url)],
-                [InlineKeyboardButton("Ver mi progreso", callback_data="m_menu")]
-            ]),
+            reply_markup=InlineKeyboardMarkup(
+                share_btns + [[InlineKeyboardButton("Ver mi progreso", callback_data="m_menu")]]
+            ),
         )
         return ST_MAIN_MENU
 
@@ -3781,6 +4125,30 @@ async def handle_free_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
         "why_now": "por_que_ahora",
         "tiempo_espana": "tiempo_espana",
     }
+    # Special handling for antecedentes — show country-specific info
+    if intent == "criminal_cert":
+        tid = update.effective_user.id
+        user = get_user(tid)
+        country_code = user.get("country_code", "other") if user else "other"
+        country = COUNTRIES.get(country_code, COUNTRIES["other"])
+        info_text = country.get("antecedentes_info", COUNTRIES["other"]["antecedentes_info"])
+        await update.message.reply_text(
+            info_text + "\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📌 *IMPORTANTE*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "• El certificado debe tener menos de 3 meses de antigüedad\n"
+            "• Debe estar apostillado o legalizado\n"
+            "• Si está en otro idioma, necesita traducción jurada en España\n\n"
+            "¿Tienes dudas? Escríbenos y te ayudamos.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("💬 Consultar con abogado", callback_data="m_contact")],
+                [InlineKeyboardButton("← Menú", callback_data="back")],
+            ]),
+        )
+        return ST_MAIN_MENU
+
     if intent in intent_faq_map:
         faq = FAQ.get(intent_faq_map[intent])
         if faq:
@@ -4857,6 +5225,40 @@ async def cmd_ayuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     return ST_FAQ_MENU
 
 
+async def cmd_antecedentes(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show country-specific antecedentes info: /antecedentes"""
+    tid = update.effective_user.id
+    user = get_user(tid)
+
+    if not user:
+        await update.message.reply_text(
+            "No tiene una cuenta registrada.\n"
+            "Escriba /start para comenzar.",
+        )
+        return ConversationHandler.END
+
+    country_code = user.get("country_code", "other")
+    country = COUNTRIES.get(country_code, COUNTRIES["other"])
+    info_text = country.get("antecedentes_info", COUNTRIES["other"]["antecedentes_info"])
+
+    await update.message.reply_text(
+        info_text + "\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📌 *IMPORTANTE*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "• El certificado debe tener menos de 3 meses de antigüedad\n"
+        "• Debe estar apostillado o legalizado\n"
+        "• Si está en otro idioma, necesita traducción jurada en España\n\n"
+        "¿Tienes dudas? Escríbenos y te ayudamos.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("💬 Consultar con abogado", callback_data="m_contact")],
+            [InlineKeyboardButton("← Menú", callback_data="back")],
+        ]),
+    )
+    return ST_MAIN_MENU
+
+
 async def cmd_contacto(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     """Start human contact flow: /contacto"""
     await update.message.reply_text(
@@ -5001,6 +5403,7 @@ def main():
             CommandHandler("referidos", cmd_referidos),
             CommandHandler("ayuda", cmd_ayuda),
             CommandHandler("contacto", cmd_contacto),
+            CommandHandler("antecedentes", cmd_antecedentes),
         ],
         states={
             ST_ENTER_REFERRAL_CODE: [
@@ -5083,6 +5486,7 @@ def main():
             CommandHandler("referidos", cmd_referidos),
             CommandHandler("ayuda", cmd_ayuda),
             CommandHandler("contacto", cmd_contacto),
+            CommandHandler("antecedentes", cmd_antecedentes),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text),
             MessageHandler(filters.PHOTO, handle_photo_upload),
             MessageHandler(filters.Document.ALL, handle_file_upload),
