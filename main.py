@@ -1816,6 +1816,22 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         )
         return ConversationHandler.END
 
+    # Route country selection callbacks (fallback if state handler misses)
+    if d.startswith("c_"):
+        return await handle_country(update, ctx)
+
+    # Route eligibility Q1 callbacks
+    if d.startswith("d_"):
+        return await handle_q1(update, ctx)
+
+    # Route eligibility Q2 callbacks
+    if d.startswith("t_"):
+        return await handle_q2(update, ctx)
+
+    # Route eligibility Q3 callbacks
+    if d.startswith("r_"):
+        return await handle_q3(update, ctx)
+
     # FAQ callback routing (from eligibility screen and other places)
     if d.startswith("fq_"):
         key = d[3:]
