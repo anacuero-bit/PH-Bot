@@ -978,12 +978,35 @@ FAQ = {
     "costo": {
         "title": "¿Cuánto cuesta la regularización?",
         "keywords": ["precio", "cuesta", "cuánto cuesta", "tarifa", "caro", "barato",
-                     "dinero", "costo"],
+                     "dinero", "costo", "tasas", "modelo 790", "gobierno"],
         "text": (
             "*¿Cuánto cuesta la regularización?*\n\n"
-            "Tasas gubernamentales: tasa administrativa correspondiente (modelo 790).\n\n"
-            "Nuestro servicio de gestión completa: *€299* en fases.\n"
-            "Fase 1 gratis, Fase 2 €39, Fase 3 €150, Fase 4 €110."
+            "*Nuestro servicio (€297 total):*\n"
+            "Se paga en 4 fases para que no tengas que pagar todo de golpe:\n\n"
+            "🆓 *Fase 1 — Gratis*\n"
+            "Verificación de elegibilidad + subida de tus primeros documentos. "
+            "Sin compromiso.\n\n"
+            "💳 *Fase 2 — €47*\n"
+            "Revisión legal de tus documentos por un abogado. "
+            "Se desbloquea cuando subes 3+ documentos.\n\n"
+            "💳 *Fase 3 — €150*\n"
+            "Preparación completa de tu expediente. "
+            "Nuestro equipo organiza, valida y prepara todo para presentar.\n\n"
+            "💳 *Fase 4 — €100*\n"
+            "Presentación telemática ante el Gobierno + seguimiento "
+            "hasta la resolución.\n\n"
+            "*Tasas del Gobierno (aparte):*\n"
+            "📋 Modelo 790-052 (solicitud): ~€16\n"
+            "📋 Modelo 790-012 (TIE): ~€16\n"
+            "📋 Tasa de huella dactilar: ~€6\n"
+            "Total tasas gobierno: *~€38*\n\n"
+            "*Costo total estimado: ~€335* (servicio + gobierno)\n\n"
+            "💡 *¿Por qué en fases?*\n"
+            "Para que empieces gratis, veas el valor del servicio, "
+            "y solo pagues cuando estés seguro. Sin letra pequeña.\n\n"
+            "🎁 *Descuentos:*\n"
+            "Invita amigos con tu código y gana €25 por cada uno. "
+            "Con 12 amigos, ¡tu servicio es gratis!"
         ),
     },
     "por_que_pagar": {
@@ -2155,6 +2178,105 @@ def get_whatsapp_share_url(code: str) -> str:
     return f"https://wa.me/?text={urllib.parse.quote(text)}"
 
 
+def get_telegram_share_url(code: str) -> str:
+    """Generate Telegram share URL with referral code."""
+    import urllib.parse
+    text = (
+        f"¡Hola! Verifiqué que califico para la regularización 2026 en España.\n\n"
+        f"Si llevas tiempo aquí sin papeles, verifica gratis si calificas:\n"
+        f"👉 tuspapeles2026.es\n\n"
+        f"Usa mi código {code} y te descuentan €25."
+    )
+    return f"https://t.me/share/url?url=https://tuspapeles2026.es&text={urllib.parse.quote(text)}"
+
+
+def get_facebook_share_url() -> str:
+    """Generate Facebook share URL."""
+    import urllib.parse
+    return f"https://www.facebook.com/sharer/sharer.php?u={urllib.parse.quote('https://tuspapeles2026.es')}"
+
+
+def get_share_buttons(code: str) -> list:
+    """Generate social media share buttons for referral code."""
+    wa_url = get_whatsapp_share_url(code)
+    tg_url = get_telegram_share_url(code)
+    fb_url = get_facebook_share_url()
+    return [
+        [InlineKeyboardButton("📱 WhatsApp", url=wa_url),
+         InlineKeyboardButton("✈️ Telegram", url=tg_url)],
+        [InlineKeyboardButton("📘 Facebook", url=fb_url)],
+        [InlineKeyboardButton("📋 Copiar código", callback_data=f"copy_code_{code}")],
+    ]
+
+
+def build_referidos_text(stats: dict) -> str:
+    """Build the comprehensive referidos screen text."""
+    code = stats['code']
+    count = stats['count']
+    credits_earned = stats['credits_earned']
+    credits_available = stats['credits_available']
+    can_earn = stats['can_earn']
+
+    # Activation status
+    if can_earn:
+        activation = "✅ *Tu código está activo*"
+    else:
+        activation = (
+            "⏳ *Tu código se activa al pagar la Fase 2 (€39)*\n"
+            "Una vez activo, ganarás €25 por cada amigo que pague."
+        )
+
+    # Progress toward free service
+    if credits_earned >= REFERRAL_CREDIT_CAP:
+        progress_msg = "🎉 *¡Servicio completamente gratis!* Has alcanzado el máximo de créditos."
+    elif credits_earned > 0:
+        remaining = REFERRAL_CREDIT_CAP - credits_earned
+        friends_needed = max(1, remaining // REFERRAL_CREDIT_AMOUNT)
+        progress_msg = (
+            f"📊 *Progreso:* €{credits_earned} de €{REFERRAL_CREDIT_CAP}\n"
+            f"Te faltan {friends_needed} amigos más para servicio gratis."
+        )
+    else:
+        friends_for_free = REFERRAL_CREDIT_CAP // REFERRAL_CREDIT_AMOUNT
+        progress_msg = (
+            f"💡 Invita a {friends_for_free} amigos y tu servicio es *completamente gratis*."
+        )
+
+    # Referral list
+    ref_list = ""
+    if stats['referrals']:
+        ref_list = "\n👥 *Tus referidos:*\n"
+        for r in stats['referrals'][:10]:
+            if r.get('status') != 'registered':
+                icon = "✅"
+                credit_text = f" → +€{r.get('credit_amount', 0)}"
+            else:
+                icon = "⏳"
+                credit_text = " (pendiente de pago)"
+            name = r.get('referred_name', 'Usuario')
+            ref_list += f"{icon} {name}{credit_text}\n"
+    elif can_earn:
+        ref_list = "\n_Aún no tienes referidos. ¡Comparte tu código!_"
+
+    text = (
+        f"👥 *Programa de Referidos*\n\n"
+        f"{activation}\n\n"
+        f"🔑 Tu código: `{code}`\n\n"
+        f"*¿Cómo funciona?*\n"
+        f"1️⃣ Comparte tu código con amigos\n"
+        f"2️⃣ Ellos verifican gratis si califican\n"
+        f"3️⃣ Cuando paguen, tú recibes *€{REFERRAL_CREDIT_AMOUNT} de crédito*\n\n"
+        f"*Tus estadísticas:*\n"
+        f"👥 Referidos que pagaron: {count}\n"
+        f"💰 Crédito ganado: €{credits_earned}\n"
+        f"💳 Crédito disponible: €{credits_available}\n\n"
+        f"{progress_msg}"
+        f"{ref_list}\n\n"
+        f"👇 *Comparte por tu red favorita:*"
+    )
+    return text
+
+
 # =============================================================================
 # DOCUMENT PROCESSING
 # =============================================================================
@@ -2320,6 +2442,22 @@ def get_country_checklist(country_code: str) -> str:
     return "\n".join(checklist)
 
 
+def calculate_progress(user: Dict, dc_approved: int) -> int:
+    """Calculate progress percentage — single source of truth for all screens."""
+    if user.get("phase4_paid"):
+        return 95
+    elif user.get("phase3_paid"):
+        return 85
+    elif user.get("phase2_paid"):
+        return min(75, 65 + dc_approved)
+    elif dc_approved >= MIN_DOCS_FOR_PHASE2:
+        return 50 + min(15, dc_approved * 2)
+    elif dc_approved > 0:
+        return 15 + (dc_approved * 10)
+    else:
+        return 10
+
+
 def phase_name(user: Dict) -> str:
     if user.get("phase4_paid"): return "Fase 4 — Presentación"
     if user.get("phase3_paid"): return "Fase 3 — Procesamiento"
@@ -2374,10 +2512,11 @@ def main_menu_kb(user: Dict) -> InlineKeyboardMarkup:
     elif user.get("phase3_paid") and not user.get("phase4_paid") and user.get("expediente_ready"):
         btns.append([InlineKeyboardButton("🔓 Presentación — €110", callback_data="m_pay4")])
     btns += [
-        [InlineKeyboardButton("👥 Mis referidos", callback_data="m_referidos")],
+        [InlineKeyboardButton("📣 Invitar amigos", callback_data="m_referidos"),
+         InlineKeyboardButton("👥 Mis referidos", callback_data="m_referidos")],
         [InlineKeyboardButton("💰 Costos y pagos", callback_data="m_price")],
         [InlineKeyboardButton("❓ Preguntas frecuentes", callback_data="m_faq")],
-        [InlineKeyboardButton("📞 Hablar con nuestro equipo", callback_data="m_contact")],
+        [InlineKeyboardButton("💬 Consultar con abogado", callback_data="m_contact")],
     ]
     return InlineKeyboardMarkup(btns)
 
@@ -2865,19 +3004,8 @@ async def show_main_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     dc_total = get_doc_count(tid)
     dc_approved = get_approved_doc_count(tid)
 
-    # Dynamic progress bar (based on approved documents only)
-    if user.get("phase4_paid"):
-        progress = 95
-    elif user.get("phase3_paid"):
-        progress = 85
-    elif user.get("phase2_paid"):
-        progress = min(75, 65 + dc_approved)
-    elif dc_approved >= MIN_DOCS_FOR_PHASE2:
-        progress = 50 + min(15, dc_approved * 2)
-    elif dc_approved > 0:
-        progress = 15 + (dc_approved * 10)
-    else:
-        progress = 10
+    # Dynamic progress bar (shared calculation)
+    progress = calculate_progress(user, dc_approved)
     bar = "█" * (progress // 10) + "░" * (10 - progress // 10)
 
     # Document status line
@@ -3075,42 +3203,20 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             )
             return ST_MAIN_MENU
 
-        # Simple status line
-        if not stats['can_earn']:
-            status = "Paga €39 para activar tus ganancias por referidos."
-        elif stats['credits_available'] >= REFERRAL_CREDIT_CAP:
-            status = "Has alcanzado el máximo. Ahora ganas 10% en efectivo."
-        else:
-            remaining = REFERRAL_CREDIT_CAP - stats['credits_earned']
-            needed = remaining // REFERRAL_CREDIT_AMOUNT
-            status = f"Te faltan {needed} amigos para servicio gratis."
-
-        # Referral list (simple)
-        ref_list = ""
-        if stats['referrals']:
-            ref_list = "\nReferidos:\n"
-            for r in stats['referrals'][:5]:
-                status_icon = "pagado" if r.get('status') != 'registered' else "pendiente"
-                credit = f" +€{r.get('credit_amount', 0)}" if r.get('credit_amount') else ""
-                ref_list += f"- {r.get('referred_name', 'Usuario')} ({status_icon}){credit}\n"
-
-        wa_url = get_whatsapp_share_url(stats['code'])
+        text = build_referidos_text(stats)
+        buttons = get_share_buttons(stats['code'])
+        buttons.append([InlineKeyboardButton("← Volver", callback_data="back")])
 
         await q.edit_message_text(
-            f"*Tus referidos*\n\n"
-            f"Tu código: `{stats['code']}`\n\n"
-            f"Referidos que han pagado: {stats['count']}\n"
-            f"Crédito ganado: €{stats['credits_earned']}\n"
-            f"Crédito usado: €{stats['credits_used']}\n"
-            f"Disponible: €{stats['credits_available']}\n\n"
-            f"{status}"
-            f"{ref_list}",
+            text,
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📱 Compartir por WhatsApp", url=wa_url)],
-                [InlineKeyboardButton("← Volver", callback_data="back")],
-            ]),
+            reply_markup=InlineKeyboardMarkup(buttons),
         )
+        return ST_MAIN_MENU
+
+    if d.startswith("copy_code_"):
+        code = d[len("copy_code_"):]
+        await q.answer(f"Tu código: {code} — compártelo con tus amigos", show_alert=True)
         return ST_MAIN_MENU
 
     if d == "m_faq":
@@ -3440,16 +3546,21 @@ async def handle_photo_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) ->
         unlock = "\n\n🎉 Ya puedes desbloquear la *revisión legal completa* por €39."
 
     # Always show success to user
+    share_hint = ""
+    if dc >= 3:
+        share_hint = "\n\n💡 ¿Conoces a alguien en tu misma situación? Invítalo y gana €25 de crédito."
+
     await update.message.reply_text(
         f"✅ *¡Documento recibido!*\n\n"
         f"Tu *{info['name']}* ha sido guardado y será revisado por nuestro equipo "
         f"legal en las próximas horas.\n\n"
         f"Te notificaremos cuando esté verificado. Mientras tanto, puedes seguir "
         f"subiendo más documentos.\n\n"
-        f"📄 Documentos subidos: {dc}{unlock}",
+        f"📄 Documentos subidos: {dc}{unlock}{share_hint}",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
+            [InlineKeyboardButton("📣 Invitar amigos", callback_data="m_referidos")],
             [InlineKeyboardButton("Volver al menú", callback_data="back")],
         ]),
     )
@@ -3511,16 +3622,21 @@ async def handle_file_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
         unlock = "\n\n🎉 Ya puedes desbloquear la *revisión legal completa* por €39."
 
     # Always show success to user
+    share_hint = ""
+    if dc >= 3:
+        share_hint = "\n\n💡 ¿Conoces a alguien en tu misma situación? Invítalo y gana €25 de crédito."
+
     await update.message.reply_text(
         f"✅ *¡Documento recibido!*\n\n"
         f"Tu *{info['name']}* ha sido guardado y será revisado por nuestro equipo "
         f"legal en las próximas horas.\n\n"
         f"Te notificaremos cuando esté verificado. Mientras tanto, puedes seguir "
         f"subiendo más documentos.\n\n"
-        f"📄 Documentos subidos: {dc}{unlock}",
+        f"📄 Documentos subidos: {dc}{unlock}{share_hint}",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
+            [InlineKeyboardButton("📣 Invitar amigos", callback_data="m_referidos")],
             [InlineKeyboardButton("Volver al menú", callback_data="back")],
         ]),
     )
@@ -4602,38 +4718,14 @@ async def cmd_referidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         )
         return ConversationHandler.END
 
-    # Simple status line
-    if not stats['can_earn']:
-        status = "Paga €39 para activar tus ganancias por referidos."
-    elif stats['credits_available'] >= REFERRAL_CREDIT_CAP:
-        status = "Has alcanzado el máximo. Ahora ganas 10% en efectivo."
-    else:
-        remaining = REFERRAL_CREDIT_CAP - stats['credits_earned']
-        needed = remaining // REFERRAL_CREDIT_AMOUNT
-        status = f"Te faltan {needed} amigos para servicio gratis."
-
-    # Referral list (simple)
-    ref_list = ""
-    if stats['referrals']:
-        ref_list = "\nReferidos:\n"
-        for r in stats['referrals'][:5]:
-            status_icon = "pagado" if r.get('status') != 'registered' else "pendiente"
-            credit = f" +€{r.get('credit_amount', 0)}" if r.get('credit_amount') else ""
-            ref_list += f"- {r.get('referred_name', 'Usuario')} ({status_icon}){credit}\n"
+    text = build_referidos_text(stats)
+    buttons = get_share_buttons(stats['code'])
+    buttons.append([InlineKeyboardButton("← Menú", callback_data="back")])
 
     await update.message.reply_text(
-        f"*Tus referidos*\n\n"
-        f"Tu código: `{stats['code']}`\n\n"
-        f"Referidos que han pagado: {stats['count']}\n"
-        f"Crédito ganado: €{stats['credits_earned']}\n"
-        f"Crédito usado: €{stats['credits_used']}\n"
-        f"Disponible: €{stats['credits_available']}\n\n"
-        f"{status}"
-        f"{ref_list}",
+        text,
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Menú", callback_data="m_menu")],
-        ]),
+        reply_markup=InlineKeyboardMarkup(buttons),
     )
     return ST_MAIN_MENU
 
@@ -4674,24 +4766,34 @@ async def cmd_estado(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         payments.append("Fase 4 ✓")
     payment_status = " | ".join(payments) if payments else "Sin pagos realizados"
 
-    # Progress bar
-    progress = case.get('progress', 0)
-    filled = int(progress / 10)
+    # Progress bar (shared calculation)
+    dc_approved = get_approved_doc_count(tid)
+    progress = calculate_progress(user, dc_approved)
+    filled = progress // 10
     bar = "█" * filled + "░" * (10 - filled)
+
+    # Doc summary
+    doc_status = f"📄 Documentos: {len(docs)} subidos"
+    if dc_approved < len(docs):
+        pending = len(docs) - dc_approved
+        doc_status += f" ({dc_approved} aprobados, {pending} en revisión)"
+    elif dc_approved > 0:
+        doc_status += f" ({dc_approved} aprobados)"
 
     await update.message.reply_text(
         f"*Estado de su expediente*\n\n"
         f"📋 Expediente: `{case.get('case_number', 'N/A')}`\n"
-        f"📊 Fase actual: {phase_name}\n"
+        f"📊 Fase actual: {phase_name(user)}\n"
         f"💳 Pagos: {payment_status}\n"
-        f"📄 Documentos: {len(docs)} subidos\n"
+        f"{doc_status}\n"
         f"📈 Progreso: {bar} {progress}%\n\n"
         f"{'✅ Expediente listo para presentar' if user.get('expediente_ready') else '⏳ En proceso'}",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("📄 Ver documentos", callback_data="m_docs")],
-            [InlineKeyboardButton("📞 Contactar", callback_data="m_contact")],
-            [InlineKeyboardButton("← Menú", callback_data="m_menu")],
+            [InlineKeyboardButton("📤 Subir documento", callback_data="m_upload")],
+            [InlineKeyboardButton("📣 Compartir mi código", callback_data="m_referidos")],
+            [InlineKeyboardButton("← Menú", callback_data="back")],
         ]),
     )
     return ST_MAIN_MENU
