@@ -1558,40 +1558,59 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Reset user account completely - delete all data and end conversation."""
+    """Reset user account - ADMIN ONLY. Usage: /reset or /reset <telegram_id>"""
     tid = update.effective_user.id
     chat_id = update.effective_chat.id
-    logger.info(f"RESET requested by user {tid}")
+
+    # Admin-only command
+    if tid not in ADMIN_IDS:
+        await update.message.reply_text(
+            "Este comando está reservado para administradores.\n\n"
+            "Si necesita ayuda con su cuenta, escriba /start o contacte con soporte."
+        )
+        return ConversationHandler.END
+
+    # Check if admin wants to reset another user: /reset 123456789
+    target_tid = tid  # Default: reset own account
+    if update.message and update.message.text:
+        parts = update.message.text.split()
+        if len(parts) > 1:
+            try:
+                target_tid = int(parts[1])
+            except ValueError:
+                await update.message.reply_text("Uso: /reset o /reset <telegram_id>")
+                return ConversationHandler.END
+
+    logger.info(f"RESET requested by admin {tid} for user {target_tid}")
 
     # Delete from database
-    delete_user(tid)
+    delete_user(target_tid)
 
-    # Clear ALL context data
-    ctx.user_data.clear()
-    if hasattr(ctx, 'chat_data') and ctx.chat_data:
-        ctx.chat_data.clear()
+    # Clear context data if resetting own account
+    if target_tid == tid:
+        ctx.user_data.clear()
+        if hasattr(ctx, 'chat_data') and ctx.chat_data:
+            ctx.chat_data.clear()
 
-    # Send confirmation (handle both message and callback scenarios)
-    confirmation = (
-        "✅ Su cuenta ha sido eliminada completamente.\n\n"
-        "Todos sus datos, documentos y progreso han sido borrados.\n"
-        "Escriba /start para comenzar de nuevo."
-    )
+    # Send confirmation
+    if target_tid == tid:
+        confirmation = (
+            "✅ Su cuenta ha sido eliminada completamente.\n\n"
+            "Todos sus datos, documentos y progreso han sido borrados.\n"
+            "Escriba /start para comenzar de nuevo."
+        )
+    else:
+        confirmation = f"✅ Usuario {target_tid} eliminado de la base de datos."
+
     try:
         if update.message:
             await update.message.reply_text(confirmation)
         else:
-            # Fallback: send directly to chat
             await ctx.bot.send_message(chat_id=chat_id, text=confirmation)
     except Exception as e:
         logger.error(f"Error sending reset confirmation: {e}")
-        # Last resort: try sending directly
-        try:
-            await ctx.bot.send_message(chat_id=chat_id, text=confirmation)
-        except Exception as e2:
-            logger.error(f"Fallback send also failed: {e2}")
 
-    logger.info(f"RESET completed for user {tid}")
+    logger.info(f"RESET completed for user {target_tid}")
     return ConversationHandler.END
 
 
