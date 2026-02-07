@@ -1056,6 +1056,7 @@ def init_db():
             intent TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
+        conn.commit()
         logger.info("Database: PostgreSQL initialized")
     else:
         # SQLite schema
@@ -1116,6 +1117,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )""")
+        conn.commit()
         logger.info("Database: SQLite initialized")
 
     # Add referral columns to users table (both PostgreSQL and SQLite)
@@ -1132,8 +1134,9 @@ def init_db():
     for col_name, col_type in referral_columns:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+            conn.commit()
         except Exception:
-            pass  # Column already exists
+            conn.rollback()  # Reset transaction state for PostgreSQL
 
     # Create referrals table
     if USE_POSTGRES:
@@ -1164,6 +1167,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(referrer_user_id, referred_user_id)
         )""")
+    conn.commit()
 
     # Create referral_events table for audit
     if USE_POSTGRES:
@@ -1184,13 +1188,15 @@ def init_db():
             description TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
+    conn.commit()
 
     # Create indexes for referral system
     try:
         c.execute("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_referrals_code ON referrals(referrer_code)")
+        conn.commit()
     except Exception:
-        pass
+        conn.rollback()
 
     conn.commit()
     conn.close()
@@ -1623,6 +1629,18 @@ def mark_credits_used(user_id: int, amount: float):
     c.execute(f"INSERT INTO referral_events (user_id, event_type, amount, description) VALUES ({p}, 'credit_applied', {p}, 'Payment')", (user_id, amount))
     conn.commit()
     conn.close()
+
+
+def get_whatsapp_share_url(code: str) -> str:
+    """Generate WhatsApp share URL with referral code."""
+    import urllib.parse
+    text = (
+        f"¡Hola! Verifiqué que califico para la regularización 2026 en España.\n\n"
+        f"Si llevas tiempo aquí sin papeles, verifica gratis si calificas:\n"
+        f"👉 tuspapeles2026.es\n\n"
+        f"Usa mi código {code} y te descuentan €25."
+    )
+    return f"https://wa.me/?text={urllib.parse.quote(text)}"
 
 
 # =============================================================================
@@ -2253,8 +2271,8 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "Presentación: 100% online.\n\n"
         "El siguiente paso es preparar su documentación. "
         "Puede empezar ahora mismo — es completamente gratuito.\n\n"
-        f"Tu código personal: `{code}`\n"
-        "Si conoces a alguien en tu situación, puede usarlo para €25 de descuento.",
+        f"Tu código: `{code}`\n"
+        "Tus amigos reciben €25 de descuento. Cuando pagues tu primera fase, tú también ganas €25 por cada amigo.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Ver qué documentos necesito", callback_data="fq_pruebas_residencia")],
@@ -2531,10 +2549,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         if result.get('credited'):
             # Minimal notification to referrer
             try:
-                user = get_user(tid)
+                user_data = get_user(tid)
                 await ctx.bot.send_message(
                     result['referrer_id'],
-                    f"Tu amigo {user.get('first_name', 'alguien')} usó tu código. +€{result['amount']} crédito.",
+                    f"Tu amigo {user_data.get('first_name', 'alguien')} usó tu código. +€{result['amount']} crédito.",
                 )
             except Exception as e:
                 logger.error(f"Failed to notify referrer: {e}")
@@ -2544,11 +2562,20 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"Pago Fase 2: User {tid}\n"
             f"Descuento: €{discount} | Créditos: €{credits_used}")
 
+        # Get user's referral code for activation message
+        user = get_user(tid)
+        code = user.get('referral_code', '')
+        wa_url = get_whatsapp_share_url(code)
+
         await q.edit_message_text(
             "Pago recibido.\n\n"
             "Nuestro equipo revisará su documentación en las próximas 24-48 horas.\n"
-            "Le notificaremos cuando esté listo para la siguiente fase.",
+            "Le notificaremos cuando esté listo para la siguiente fase.\n\n"
+            f"✓ Tu código de referido está activo: `{code}`\n\n"
+            "Ahora ganas €25 de crédito por cada amigo que pague usando tu código.",
+            parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📱 Compartir por WhatsApp", url=wa_url)],
                 [InlineKeyboardButton("Ver mi progreso", callback_data="m_menu")]
             ]),
         )
