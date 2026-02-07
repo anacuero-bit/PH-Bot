@@ -219,7 +219,17 @@ PRICING = {
     ST_PAY_PHASE4,
     ST_CONTACT,
     ST_HUMAN_MSG,
-) = range(19)
+    ST_ENTER_REFERRAL_CODE,
+) = range(20)
+
+# =============================================================================
+# REFERRAL SYSTEM
+# =============================================================================
+
+REFERRAL_CREDIT_AMOUNT = 25      # €25 per referral
+REFERRAL_CREDIT_CAP = 299        # Max credits (full service)
+REFERRAL_CASH_PERCENT = 0.10     # 10% cash after cap
+REFERRAL_FRIEND_DISCOUNT = 25    # €25 off for friend
 
 # =============================================================================
 # COUNTRY DATA (no slang greetings — professional tone)
@@ -1108,6 +1118,80 @@ def init_db():
         )""")
         logger.info("Database: SQLite initialized")
 
+    # Add referral columns to users table (both PostgreSQL and SQLite)
+    referral_columns = [
+        ("referral_code", "VARCHAR(20)"),
+        ("referred_by_code", "VARCHAR(20)"),
+        ("referred_by_user_id", "BIGINT"),
+        ("referral_count", "INTEGER DEFAULT 0"),
+        ("referral_credits_earned", "REAL DEFAULT 0"),
+        ("referral_credits_used", "REAL DEFAULT 0"),
+        ("referral_cash_earned", "REAL DEFAULT 0"),
+        ("friend_discount_applied", "INTEGER DEFAULT 0"),
+    ]
+    for col_name, col_type in referral_columns:
+        try:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+        except Exception:
+            pass  # Column already exists
+
+    # Create referrals table
+    if USE_POSTGRES:
+        c.execute("""CREATE TABLE IF NOT EXISTS referrals (
+            id SERIAL PRIMARY KEY,
+            referrer_user_id BIGINT NOT NULL,
+            referrer_code VARCHAR(20) NOT NULL,
+            referred_user_id BIGINT NOT NULL,
+            status VARCHAR(20) DEFAULT 'registered',
+            credit_amount REAL DEFAULT 0,
+            credit_awarded_at TIMESTAMP,
+            cash_amount REAL DEFAULT 0,
+            friend_total_paid REAL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(referrer_user_id, referred_user_id)
+        )""")
+    else:
+        c.execute("""CREATE TABLE IF NOT EXISTS referrals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            referrer_user_id INTEGER NOT NULL,
+            referrer_code VARCHAR(20) NOT NULL,
+            referred_user_id INTEGER NOT NULL,
+            status VARCHAR(20) DEFAULT 'registered',
+            credit_amount REAL DEFAULT 0,
+            credit_awarded_at TIMESTAMP,
+            cash_amount REAL DEFAULT 0,
+            friend_total_paid REAL DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(referrer_user_id, referred_user_id)
+        )""")
+
+    # Create referral_events table for audit
+    if USE_POSTGRES:
+        c.execute("""CREATE TABLE IF NOT EXISTS referral_events (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT NOT NULL,
+            event_type VARCHAR(30) NOT NULL,
+            amount REAL,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+    else:
+        c.execute("""CREATE TABLE IF NOT EXISTS referral_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            event_type VARCHAR(30) NOT NULL,
+            amount REAL,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+
+    # Create indexes for referral system
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_referrals_code ON referrals(referrer_code)")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -1261,6 +1345,296 @@ def find_faq_match(text: str) -> Optional[Dict]:
             best_score = score
             best = faq
     return best if best_score >= 4 else None
+
+
+# =============================================================================
+# REFERRAL FUNCTIONS
+# =============================================================================
+
+import random
+import string
+
+def generate_referral_code(first_name: str) -> str:
+    """Generate unique referral code: NAME-XXXX"""
+    clean_name = ''.join(c for c in first_name.upper() if c.isalpha())[:8]
+    if not clean_name:
+        clean_name = "USER"
+
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+
+    for _ in range(10):
+        suffix = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+        code = f"{clean_name}-{suffix}"
+        c.execute(f"SELECT 1 FROM users WHERE referral_code = {p}", (code,))
+        if not c.fetchone():
+            conn.close()
+            return code
+
+    conn.close()
+    return f"{clean_name}-{random.randint(10000, 99999)}"
+
+
+def validate_referral_code(code: str) -> dict:
+    """Validate referral code and return referrer info."""
+    if not code or len(code) < 3:
+        return {'valid': False, 'error': 'invalid_format'}
+
+    code = code.upper().strip()
+
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    c.execute(f"SELECT telegram_id, first_name FROM users WHERE referral_code = {p}", (code,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return {'valid': False, 'error': 'not_found'}
+
+    return {
+        'valid': True,
+        'referrer_id': row[0],
+        'referrer_name': row[1],
+        'code': code
+    }
+
+
+def apply_referral_code_to_user(user_id: int, code: str, referrer_id: int) -> bool:
+    """Store referral relationship."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+
+    try:
+        c.execute(f"""
+            UPDATE users
+            SET referred_by_code = {p}, referred_by_user_id = {p}
+            WHERE telegram_id = {p} AND referred_by_code IS NULL
+        """, (code, referrer_id, user_id))
+
+        c.execute(f"""
+            INSERT OR IGNORE INTO referrals (referrer_user_id, referrer_code, referred_user_id)
+            VALUES ({p}, {p}, {p})
+        """, (referrer_id, code, user_id))
+
+        c.execute(f"""
+            INSERT INTO referral_events (user_id, event_type, description)
+            VALUES ({p}, 'code_used', {p})
+        """, (user_id, f"Used code {code}"))
+
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error applying referral: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def get_referral_stats(user_id: int) -> dict:
+    """Get referral statistics for a user."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+
+    c.execute(f"SELECT * FROM users WHERE telegram_id = {p}", (user_id,))
+    row = c.fetchone()
+
+    if not row:
+        conn.close()
+        return None
+
+    user = _row_to_dict(row, c)
+
+    c.execute(f"""
+        SELECT r.*, u.first_name as referred_name
+        FROM referrals r
+        JOIN users u ON r.referred_user_id = u.telegram_id
+        WHERE r.referrer_user_id = {p}
+        ORDER BY r.created_at DESC LIMIT 10
+    """, (user_id,))
+    referrals = [_row_to_dict(r, c) for r in c.fetchall()]
+
+    conn.close()
+
+    earned = float(user.get('referral_credits_earned') or 0)
+    used = float(user.get('referral_credits_used') or 0)
+
+    return {
+        'code': user.get('referral_code'),
+        'count': user.get('referral_count') or 0,
+        'credits_earned': earned,
+        'credits_used': used,
+        'credits_available': max(0, earned - used),
+        'cash_earned': user.get('referral_cash_earned') or 0,
+        'can_earn': user.get('phase2_paid') == 1,
+        'referrals': referrals
+    }
+
+
+def credit_referrer(referred_user_id: int, payment_amount: float) -> dict:
+    """Credit referrer when friend pays."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+
+    try:
+        c.execute(f"""
+            SELECT r.referrer_user_id, r.credit_amount,
+                   u.phase2_paid, u.referral_credits_earned
+            FROM referrals r
+            JOIN users u ON r.referrer_user_id = u.telegram_id
+            WHERE r.referred_user_id = {p}
+        """, (referred_user_id,))
+
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            return {'credited': False, 'reason': 'no_referrer'}
+
+        referrer_id = row[0]
+        existing_credit = row[1] or 0
+        phase2_paid = row[2] == 1
+        credits_earned = float(row[3] or 0)
+
+        if not phase2_paid:
+            conn.close()
+            return {'credited': False, 'reason': 'referrer_not_eligible'}
+
+        if existing_credit > 0:
+            conn.close()
+            return {'credited': False, 'reason': 'already_credited'}
+
+        if credits_earned >= REFERRAL_CREDIT_CAP:
+            conn.close()
+            return {'credited': False, 'reason': 'cap_reached'}
+
+        credit_amount = min(REFERRAL_CREDIT_AMOUNT, REFERRAL_CREDIT_CAP - credits_earned)
+
+        c.execute(f"""
+            UPDATE referrals
+            SET credit_amount = {p}, status = 'paid_phase2',
+                credit_awarded_at = CURRENT_TIMESTAMP,
+                friend_total_paid = {p}
+            WHERE referred_user_id = {p}
+        """, (credit_amount, payment_amount, referred_user_id))
+
+        c.execute(f"""
+            UPDATE users
+            SET referral_credits_earned = referral_credits_earned + {p},
+                referral_count = referral_count + 1
+            WHERE telegram_id = {p}
+        """, (credit_amount, referrer_id))
+
+        c.execute(f"""
+            INSERT INTO referral_events (user_id, event_type, amount, description)
+            VALUES ({p}, 'credit_earned', {p}, 'Friend paid')
+        """, (referrer_id, credit_amount))
+
+        conn.commit()
+        return {'credited': True, 'amount': credit_amount, 'referrer_id': referrer_id}
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error crediting referrer: {e}")
+        return {'credited': False, 'reason': 'error'}
+    finally:
+        conn.close()
+
+
+def get_friend_discount(user_id: int) -> dict:
+    """Check if user has friend discount available."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+
+    c.execute(f"""
+        SELECT u1.referred_by_code, u1.friend_discount_applied,
+               u2.first_name as referrer_name
+        FROM users u1
+        LEFT JOIN users u2 ON u1.referred_by_user_id = u2.telegram_id
+        WHERE u1.telegram_id = {p}
+    """, (user_id,))
+
+    row = c.fetchone()
+    conn.close()
+
+    if not row or not row[0] or row[1]:
+        return {'has_discount': False}
+
+    return {
+        'has_discount': True,
+        'amount': REFERRAL_FRIEND_DISCOUNT,
+        'referrer_name': row[2] or 'un amigo'
+    }
+
+
+def apply_friend_discount(user_id: int) -> bool:
+    """Mark friend discount as used."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    c.execute(f"UPDATE users SET friend_discount_applied = 1 WHERE telegram_id = {p}", (user_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+
+def apply_credits_to_payment(user_id: int, price: float) -> dict:
+    """Calculate price after applying credits."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+
+    c.execute(f"SELECT referral_credits_earned, referral_credits_used FROM users WHERE telegram_id = {p}", (user_id,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return {'original': price, 'credits_applied': 0, 'final_price': price, 'credits_remaining': 0}
+
+    earned = float(row[0] or 0)
+    used = float(row[1] or 0)
+    available = earned - used
+
+    if available <= 0:
+        return {'original': price, 'credits_applied': 0, 'final_price': price, 'credits_remaining': 0}
+
+    to_apply = min(available, price)
+    final = price - to_apply
+
+    return {
+        'original': price,
+        'credits_applied': to_apply,
+        'final_price': final,
+        'credits_remaining': available - to_apply
+    }
+
+
+def mark_credits_used(user_id: int, amount: float):
+    """Mark credits as used after payment."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    c.execute(f"UPDATE users SET referral_credits_used = referral_credits_used + {p} WHERE telegram_id = {p}", (amount, user_id))
+    c.execute(f"INSERT INTO referral_events (user_id, event_type, amount, description) VALUES ({p}, 'credit_applied', {p}, 'Payment')", (user_id, amount))
+    conn.commit()
+    conn.close()
+
+
+def get_whatsapp_share_url(code: str) -> str:
+    """Generate WhatsApp share URL with referral code."""
+    import urllib.parse
+    text = (
+        f"¡Hola! Verifiqué que califico para la regularización 2026 en España.\n\n"
+        f"Si llevas tiempo aquí sin papeles, verifica gratis si calificas:\n"
+        f"👉 tuspapeles2026.es\n\n"
+        f"Usa mi código {code} y te descuentan €25."
+    )
+    return f"https://wa.me/?text={urllib.parse.quote(text)}"
 
 
 # =============================================================================
@@ -1538,23 +1912,46 @@ def _user_doc_summary(tid: int) -> str:
 # =============================================================================
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
-    user = get_user(update.effective_user.id)
+    """Handle /start, including referral codes from deep links."""
+    tid = update.effective_user.id
+    user = get_user(tid)
+
+    # Existing user with eligibility → main menu
     if user and user.get("eligible"):
         return await show_main_menu(update, ctx)
 
-    create_user(update.effective_user.id, update.effective_user.first_name or "Usuario")
+    # Create user if new
+    if not user:
+        create_user(tid, update.effective_user.first_name or "Usuario")
 
+    # Check for referral code in start param (deep link: t.me/bot?start=CODE)
+    if ctx.args and len(ctx.args) > 0:
+        code = ctx.args[0].upper().strip()
+        result = validate_referral_code(code)
+
+        if result['valid'] and result['referrer_id'] != tid:
+            apply_referral_code_to_user(tid, result['code'], result['referrer_id'])
+
+            await update.message.reply_text(
+                f"Código aplicado. Tienes €{REFERRAL_FRIEND_DISCOUNT} de descuento en tu primer pago.\n\n"
+                "Bienvenido/a al servicio de regularización de *Pombo & Horowitz Abogados*.\n\n"
+                "Para empezar, indíquenos su país de origen:",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=country_kb(),
+            )
+            return ST_COUNTRY
+
+    # Normal start - ask if they have a referral code
     await update.message.reply_text(
         "Bienvenido/a al servicio de regularización de *Pombo & Horowitz Abogados*.\n\n"
-        "Le guiaremos paso a paso en el proceso de regularización extraordinaria 2026.\n\n"
-        "Todo lo que haga en esta primera fase es *gratuito*: verificar su elegibilidad, "
-        "subir documentos y recibir una revisión preliminar. No le pediremos ningún pago "
-        "hasta que haya comprobado nuestro trabajo.\n\n"
-        "Para empezar, indíquenos su país de origen:",
+        "¿Tienes un código de un amigo? Si lo tienes, escríbelo ahora para €25 de descuento.\n\n"
+        "Ejemplo: `MARIA-7K2P`",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=country_kb(),
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("No tengo código", callback_data="ref_skip")]
+        ]),
     )
-    return ST_COUNTRY
+    return ST_ENTER_REFERRAL_CODE
 
 
 async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -1616,6 +2013,81 @@ async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     return await show_main_menu(update, ctx)
+
+
+# --- Referral code entry ---
+
+async def handle_referral_code_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle user typing a referral code."""
+    tid = update.effective_user.id
+    code = update.message.text.upper().strip()
+
+    # Validate
+    result = validate_referral_code(code)
+
+    if not result['valid']:
+        await update.message.reply_text(
+            "Código no encontrado. Verifica que esté bien escrito o continúa sin código.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Intentar de nuevo", callback_data="ref_retry")],
+                [InlineKeyboardButton("Continuar sin código", callback_data="ref_skip")]
+            ]),
+        )
+        return ST_ENTER_REFERRAL_CODE
+
+    # Can't use own code
+    if result['referrer_id'] == tid:
+        await update.message.reply_text(
+            "No puedes usar tu propio código.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Continuar sin código", callback_data="ref_skip")]
+            ]),
+        )
+        return ST_ENTER_REFERRAL_CODE
+
+    # Apply code
+    apply_referral_code_to_user(tid, result['code'], result['referrer_id'])
+
+    await update.message.reply_text(
+        f"Código aplicado. Tienes €{REFERRAL_FRIEND_DISCOUNT} de descuento en tu primer pago.\n\n"
+        "Para empezar, indíquenos su país de origen:",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=country_kb(),
+    )
+    return ST_COUNTRY
+
+
+async def handle_referral_callbacks(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle referral-related buttons."""
+    q = update.callback_query
+    await q.answer()
+
+    if q.data == "ref_skip":
+        await q.edit_message_text(
+            "Bienvenido/a al servicio de regularización de *Pombo & Horowitz Abogados*.\n\n"
+            "Para empezar, indíquenos su país de origen:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=country_kb(),
+        )
+        return ST_COUNTRY
+
+    elif q.data == "ref_retry":
+        await q.edit_message_text(
+            "Escribe el código de referido:\n\nEjemplo: `MARIA-7K2P`",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("No tengo código", callback_data="ref_skip")]
+            ]),
+        )
+        return ST_ENTER_REFERRAL_CODE
+
+    elif q.data == "ref_copy":
+        user = get_user(update.effective_user.id)
+        code = user.get('referral_code', '')
+        await q.answer(f"Tu código: {code}", show_alert=True)
+        return ST_MAIN_MENU
+
+    return ST_ENTER_REFERRAL_CODE
 
 
 # --- Country selection ---
@@ -1770,26 +2242,37 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ST_Q3_RECORD
 
     # r_clean — ELIGIBLE
-    update_user(update.effective_user.id, eligible=1, has_criminal_record=0)
-    case = get_or_create_case(update.effective_user.id)
+    tid = update.effective_user.id
+    update_user(tid, eligible=1, has_criminal_record=0)
+    case = get_or_create_case(tid)
+
+    # Generate referral code for user
+    user = get_user(tid)
+    if not user.get('referral_code'):
+        code = generate_referral_code(user.get('first_name', 'USER'))
+        update_user(tid, referral_code=code)
+    else:
+        code = user['referral_code']
 
     await q.edit_message_text(
         f"*{name}, cumple los requisitos básicos para la regularización.*\n\n"
         f"Le hemos asignado el número de expediente *{case['case_number']}*.\n\n"
-        "💡 *¿Sabía que?* Este decreto NO requiere contrato de trabajo. "
+        "Este decreto NO requiere contrato de trabajo. "
         "Se presume vulnerabilidad por estar en situación irregular.\n\n"
-        "📊 En el proceso de 2005, se aprobaron el 80-90% de solicitudes. "
+        "En el proceso de 2005, se aprobaron el 80-90% de solicitudes. "
         "Este decreto es aún más flexible.\n\n"
-        f"📅 Plazo: 1 abril — 30 junio 2026 ({days_left()} días).\n"
-        "💻 Presentación: 100% online.\n\n"
+        f"Plazo: 1 abril — 30 junio 2026 ({days_left()} días).\n"
+        "Presentación: 100% online.\n\n"
         "El siguiente paso es preparar su documentación. "
-        "Puede empezar ahora mismo — es completamente gratuito.",
+        "Puede empezar ahora mismo — es completamente gratuito.\n\n"
+        f"Tu código: `{code}`\n"
+        "Tus amigos reciben €25 de descuento. Cuando pagues tu primera fase, tú también ganas €25 por cada amigo.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📄 Ver qué documentos necesito", callback_data="fq_pruebas_residencia")],
-            [InlineKeyboardButton("💰 Ver precios del servicio", callback_data="m_price")],
-            [InlineKeyboardButton("📤 Empezar a subir documentos", callback_data="m_upload")],
-            [InlineKeyboardButton("❓ Tengo más preguntas", callback_data="m_faq")],
+            [InlineKeyboardButton("Ver qué documentos necesito", callback_data="fq_pruebas_residencia")],
+            [InlineKeyboardButton("Ver precios del servicio", callback_data="m_price")],
+            [InlineKeyboardButton("Empezar a subir documentos", callback_data="m_upload")],
+            [InlineKeyboardButton("Tengo más preguntas", callback_data="m_faq")],
         ]),
     )
     return ST_ELIGIBLE
@@ -1984,43 +2467,114 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ST_HUMAN_MSG
 
     if d == "m_pay2":
-        dc = get_doc_count(update.effective_user.id)
-        text = (
-            f"*Revisión legal completa — €39*\n\n"
-            f"Ha subido {dc} documentos. Con este pago, nuestro equipo realizará:\n\n"
-            "• Análisis legal de toda su documentación.\n"
-            "• Informe detallado indicando qué está correcto y qué falta.\n"
-            "• Plan personalizado con plazos.\n"
-            "• Asesoramiento sobre antecedentes penales.\n"
-            "• Canal de soporte prioritario.\n\n"
-        )
-        if STRIPE_PHASE2_LINK:
-            text += "Pulse *Pagar con tarjeta* para un pago seguro instantáneo."
+        tid = update.effective_user.id
+        dc = get_doc_count(tid)
+        base_price = 39  # Phase 2 price
+
+        # Check friend discount
+        friend_disc = get_friend_discount(tid)
+        discount = friend_disc['amount'] if friend_disc['has_discount'] else 0
+
+        # Check referral credits
+        price_after_discount = base_price - discount
+        credit_calc = apply_credits_to_payment(tid, price_after_discount)
+
+        final_price = credit_calc['final_price']
+
+        # Store for payment confirmation
+        ctx.user_data['payment_discount'] = discount
+        ctx.user_data['payment_credits'] = credit_calc['credits_applied']
+        ctx.user_data['payment_final'] = final_price
+
+        # Build price breakdown (simple math)
+        lines = [f"*Revisión legal completa*\n"]
+        lines.append(f"Precio: €{base_price}")
+
+        if discount > 0:
+            lines.append(f"Descuento amigo: -€{discount}")
+
+        if credit_calc['credits_applied'] > 0:
+            lines.append(f"Tu crédito: -€{credit_calc['credits_applied']}")
+
+        lines.append(f"*Total: €{final_price}*\n")
+
+        if final_price <= 0:
+            lines.append("Esta fase es gratis gracias a tus referidos.")
+            if credit_calc['credits_remaining'] > 0:
+                lines.append(f"Crédito restante: €{credit_calc['credits_remaining']}")
+
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Continuar gratis", callback_data="paid2_free")],
+                [InlineKeyboardButton("Volver", callback_data="m_menu")],
+            ])
         else:
-            text += (
-                "*Formas de pago:*\n"
-                f"Bizum: {BIZUM_PHONE}\n"
-                f"Transferencia: {BANK_IBAN}\n"
-                "Concepto: su nombre + número de expediente."
-            )
+            lines.append(f"Ha subido {dc} documentos. Con este pago:\n")
+            lines.append("• Análisis legal de su documentación.")
+            lines.append("• Informe de qué está correcto y qué falta.")
+            lines.append("• Plan personalizado con plazos.")
+
+            kb = _payment_buttons("paid2", STRIPE_PHASE2_LINK)
+
         await q.edit_message_text(
-            text,
+            "\n".join(lines),
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=_payment_buttons("paid2", STRIPE_PHASE2_LINK))
+            reply_markup=kb)
         return ST_PAY_PHASE2
 
-    if d == "paid2":
-        update_user(update.effective_user.id, state="phase2_pending")
+    if d == "paid2" or d == "paid2_free":
+        tid = update.effective_user.id
+
+        # Apply discounts
+        discount = ctx.user_data.get('payment_discount', 0)
+        credits_used = ctx.user_data.get('payment_credits', 0)
+
+        if discount > 0:
+            apply_friend_discount(tid)
+
+        if credits_used > 0:
+            mark_credits_used(tid, credits_used)
+
+        # Update user status
+        update_user(tid, phase2_paid=1, current_phase=2, state="phase2_active")
+
+        # Credit the referrer
+        result = credit_referrer(tid, 39)
+
+        if result.get('credited'):
+            # Minimal notification to referrer
+            try:
+                user_data = get_user(tid)
+                await ctx.bot.send_message(
+                    result['referrer_id'],
+                    f"Tu amigo {user_data.get('first_name', 'alguien')} usó tu código. +€{result['amount']} crédito.",
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify referrer: {e}")
+
+        # Notify admins
         await notify_admins(ctx,
-            f"💳 *Pago Fase 2 pendiente*\n"
-            f"Usuario: {user.get('first_name')}\n"
-            f"TID: {update.effective_user.id}\n"
-            f"Aprobar: `/approve2 {update.effective_user.id}`")
+            f"Pago Fase 2: User {tid}\n"
+            f"Descuento: €{discount} | Créditos: €{credits_used}")
+
+        # Get user's referral code for activation message
+        user = get_user(tid)
+        code = user.get('referral_code', '')
+        wa_url = get_whatsapp_share_url(code)
+
         await q.edit_message_text(
-            "Hemos registrado su notificación de pago.\n\n"
-            "Lo verificaremos y le confirmaremos el acceso a la revisión legal. "
-            "Recibirá una notificación cuando esté activado.")
-        return ConversationHandler.END
+            "Pago recibido.\n\n"
+            "Nuestro equipo revisará su documentación en las próximas 24-48 horas.\n"
+            "Le notificaremos cuando esté listo para la siguiente fase.\n\n"
+            f"✓ Tu código de referido está activo: `{code}`\n\n"
+            "Ahora ganas €25 de crédito por cada amigo que pague usando tu código. "
+            "Con 12 amigos, tu servicio es gratis.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📱 Compartir por WhatsApp", url=wa_url)],
+                [InlineKeyboardButton("Ver mi progreso", callback_data="m_menu")]
+            ]),
+        )
+        return ST_MAIN_MENU
 
     if d == "m_pay3":
         text = (
@@ -2558,6 +3112,54 @@ async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Enviado: {sent} | Fallido: {failed}")
 
 
+async def cmd_referidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show referral stats for user."""
+    tid = update.effective_user.id
+    stats = get_referral_stats(tid)
+
+    if not stats or not stats['code']:
+        await update.message.reply_text(
+            "Aún no tienes código de referidos.\n"
+            "Completa la verificación de elegibilidad primero.",
+        )
+        return ConversationHandler.END
+
+    # Simple status line
+    if not stats['can_earn']:
+        status = "Paga €39 para activar tus ganancias por referidos."
+    elif stats['credits_available'] >= REFERRAL_CREDIT_CAP:
+        status = "Has alcanzado el máximo. Ahora ganas 10% en efectivo."
+    else:
+        remaining = REFERRAL_CREDIT_CAP - stats['credits_earned']
+        needed = remaining // REFERRAL_CREDIT_AMOUNT
+        status = f"Te faltan {needed} amigos para servicio gratis."
+
+    # Referral list (simple)
+    ref_list = ""
+    if stats['referrals']:
+        ref_list = "\nReferidos:\n"
+        for r in stats['referrals'][:5]:
+            status_icon = "pagado" if r.get('status') != 'registered' else "pendiente"
+            credit = f" +€{r.get('credit_amount', 0)}" if r.get('credit_amount') else ""
+            ref_list += f"- {r.get('referred_name', 'Usuario')} ({status_icon}){credit}\n"
+
+    await update.message.reply_text(
+        f"*Tus referidos*\n\n"
+        f"Tu código: `{stats['code']}`\n\n"
+        f"Referidos que han pagado: {stats['count']}\n"
+        f"Crédito ganado: €{stats['credits_earned']}\n"
+        f"Crédito usado: €{stats['credits_used']}\n"
+        f"Disponible: €{stats['credits_available']}\n\n"
+        f"{status}"
+        f"{ref_list}",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Menú", callback_data="m_menu")],
+        ]),
+    )
+    return ST_MAIN_MENU
+
+
 # =============================================================================
 # RE-ENGAGEMENT REMINDERS (Job Queue)
 # =============================================================================
@@ -2684,8 +3286,14 @@ def main():
             CommandHandler("start", cmd_start),
             CommandHandler("menu", cmd_menu),
             CommandHandler("reset", cmd_reset),
+            CommandHandler("referidos", cmd_referidos),
         ],
         states={
+            ST_ENTER_REFERRAL_CODE: [
+                CommandHandler("reset", cmd_reset),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_referral_code_text),
+                CallbackQueryHandler(handle_referral_callbacks, pattern="^ref_"),
+            ],
             ST_COUNTRY: [
                 CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_country, pattern="^c_"),
@@ -2779,6 +3387,7 @@ def main():
 
     app.add_handler(conv)
     app.add_handler(CommandHandler("reset", cmd_reset))
+    app.add_handler(CommandHandler("referidos", cmd_referidos))
     app.add_handler(CommandHandler("approve2", cmd_approve2))
     app.add_handler(CommandHandler("approve3", cmd_approve3))
     app.add_handler(CommandHandler("approve4", cmd_approve4))
