@@ -1,13 +1,31 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v5.2.0 — Client Intake & Case Management
+PH-Bot v5.3.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
-Updated:    2026-02-06
+Updated:    2026-02-07
 
 CHANGELOG:
 ----------
+v5.3.0 (2026-02-07)
+  - AI DOCUMENT ANALYSIS:
+  - ADDED: Claude Vision API integration for document classification
+  - ADDED: Auto-processing logic based on confidence levels:
+      - High (≥85%): Auto-approved
+      - Medium (60-85%): Pending admin review
+      - Low (<60%): User prompted to re-upload
+  - ADDED: /pendientes admin command - view pending documents
+  - ADDED: /aprobar <doc_id> - approve a document
+  - ADDED: /rechazar <doc_id> [reason] - reject a document
+  - ADDED: /ver <doc_id> - view document with AI analysis details
+  - ADDED: New document columns: ai_analysis, ai_confidence, ai_type,
+      extracted_name, extracted_address, extracted_date, approved,
+      document_country, expiry_date, issues
+  - UPDATED: Progress bar now counts only approved documents
+  - UPDATED: Phase 2 unlock based on approved doc count
+  - ADDED: User notifications when documents are approved/rejected
+
 v5.2.0 (2026-02-06)
   - INFRASTRUCTURE & FEATURES:
   - FIXED: UTF-8 encoding corruption (mojibake) - all Spanish chars now display correctly
@@ -139,6 +157,15 @@ try:
 except ImportError:
     POSTGRES_AVAILABLE = False
 
+# Optional: Anthropic Claude API for document analysis
+try:
+    import anthropic
+    import base64
+    import json
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -151,6 +178,7 @@ BANK_IBAN = os.environ.get("BANK_IBAN", "ES00 0000 0000 0000 0000 0000")
 STRIPE_PHASE2_LINK = os.environ.get("STRIPE_PHASE2_LINK", "")  # Stripe payment link for €39
 STRIPE_PHASE3_LINK = os.environ.get("STRIPE_PHASE3_LINK", "")  # Stripe payment link for €150
 STRIPE_PHASE4_LINK = os.environ.get("STRIPE_PHASE4_LINK", "")  # Stripe payment link for €110
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")  # Claude API for document analysis
 
 # Database: Use PostgreSQL if DATABASE_URL is set and connection works, otherwise SQLite
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -1213,8 +1241,162 @@ def init_db():
     except Exception:
         conn.rollback()
 
+    # Add AI analysis columns to documents table
+    doc_columns = [
+        ("ai_analysis", "TEXT"),
+        ("ai_confidence", "REAL DEFAULT 0"),
+        ("ai_type", "VARCHAR(50)"),
+        ("extracted_name", "VARCHAR(255)"),
+        ("extracted_address", "TEXT"),
+        ("extracted_date", "VARCHAR(50)"),
+        ("approved", "INTEGER DEFAULT 0"),  # 0=pending, 1=approved, -1=rejected
+        ("document_country", "VARCHAR(50)"),
+        ("expiry_date", "VARCHAR(50)"),
+        ("issues", "TEXT"),
+    ]
+    for col_name, col_type in doc_columns:
+        try:
+            c.execute(f"ALTER TABLE documents ADD COLUMN {col_name} {col_type}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
     conn.commit()
     conn.close()
+
+
+# =============================================================================
+# CLAUDE VISION API DOCUMENT ANALYSIS
+# =============================================================================
+
+async def analyze_document_with_claude(image_bytes: bytes) -> Dict:
+    """
+    Analyze a document image using Claude Vision API.
+    Returns structured analysis with type, confidence, and extracted data.
+    """
+    if not ANTHROPIC_AVAILABLE or not ANTHROPIC_API_KEY:
+        return {
+            "success": False,
+            "error": "Claude Vision API not available",
+            "type": "unknown",
+            "confidence": 0.0,
+        }
+
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+        # Encode image to base64
+        image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        # Determine media type (assume JPEG for photos from Telegram)
+        media_type = "image/jpeg"
+
+        prompt = """Analiza este documento y devuelve SOLO JSON válido sin texto adicional:
+{
+    "type": "passport|nie|dni|utility_bill|bank_statement|rental_contract|work_contract|antecedentes|empadronamiento|other",
+    "confidence": 0.0-1.0,
+    "is_identity_document": true/false,
+    "is_proof_of_residency": true/false,
+    "extracted_name": "nombre completo o null",
+    "extracted_address": "dirección completa o null",
+    "extracted_date": "fecha relevante (emisión/vencimiento) o null",
+    "document_country": "código país ISO o null",
+    "expiry_date": "fecha vencimiento o null",
+    "issues": ["lista de problemas detectados si hay alguno"]
+}
+
+Tipos de documento:
+- passport: Pasaporte
+- nie: Número de Identidad de Extranjero (tarjeta verde)
+- dni: Documento Nacional de Identidad español
+- utility_bill: Factura de luz, agua, gas, internet, teléfono
+- bank_statement: Extracto bancario o carta del banco
+- rental_contract: Contrato de alquiler
+- work_contract: Contrato de trabajo o nóminas
+- antecedentes: Certificado de antecedentes penales
+- empadronamiento: Certificado de empadronamiento
+- other: Otro documento
+
+Problemas comunes a detectar:
+- Documento borroso o ilegible
+- Documento vencido
+- Documento recortado o incompleto
+- No se ve el nombre claramente
+- No se ve la fecha claramente"""
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": image_base64,
+                            },
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        # Parse the response
+        response_text = message.content[0].text.strip()
+
+        # Try to extract JSON from response (handle potential markdown code blocks)
+        if response_text.startswith("```"):
+            # Remove markdown code block
+            lines = response_text.split("\n")
+            response_text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+
+        analysis = json.loads(response_text)
+        analysis["success"] = True
+        analysis["raw_response"] = response_text
+
+        return analysis
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Claude Vision JSON parse error: {e}, response: {response_text[:500]}")
+        return {
+            "success": False,
+            "error": f"JSON parse error: {str(e)}",
+            "type": "unknown",
+            "confidence": 0.0,
+            "raw_response": response_text if 'response_text' in dir() else "",
+        }
+    except Exception as e:
+        logger.error(f"Claude Vision API error: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "type": "unknown",
+            "confidence": 0.0,
+        }
+
+
+def get_doc_type_from_ai(ai_type: str) -> str:
+    """Map AI-detected document type to our internal doc_type codes."""
+    mapping = {
+        "passport": "passport",
+        "nie": "nie",
+        "dni": "dni",
+        "utility_bill": "utility",
+        "bank_statement": "bank",
+        "rental_contract": "rent",
+        "work_contract": "work",
+        "antecedentes": "antecedentes",
+        "empadronamiento": "empadronamiento",
+        "other": "other",
+    }
+    return mapping.get(ai_type, "other")
 
 
 def _row_to_dict(row, cursor) -> Optional[Dict]:
@@ -1288,6 +1470,64 @@ def get_doc_count(tid: int) -> int:
     return n
 
 
+def get_approved_doc_count(tid: int) -> int:
+    """Count only approved documents for a user."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    c.execute(f"SELECT COUNT(*) FROM documents d JOIN users u ON d.user_id=u.id WHERE u.telegram_id={p} AND d.approved=1", (tid,))
+    n = c.fetchone()[0]
+    conn.close()
+    return n
+
+
+def get_pending_documents(limit: int = 20) -> List[Dict]:
+    """Get documents pending admin review (approved=0)."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute(f"""
+        SELECT d.*, u.telegram_id, u.first_name
+        FROM documents d
+        JOIN users u ON d.user_id = u.id
+        WHERE d.approved = 0
+        ORDER BY d.uploaded_at DESC
+        LIMIT {limit}
+    """)
+    rows = c.fetchall()
+    result = [_row_to_dict(r, c) for r in rows]
+    conn.close()
+    return result
+
+
+def update_document_approval(doc_id: int, approved: int) -> bool:
+    """Update document approval status. approved: 1=approved, -1=rejected"""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    c.execute(f"UPDATE documents SET approved={p} WHERE id={p}", (approved, doc_id))
+    affected = c.rowcount
+    conn.commit()
+    conn.close()
+    return affected > 0
+
+
+def get_document_by_id(doc_id: int) -> Optional[Dict]:
+    """Get a document by its ID."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    c.execute(f"""
+        SELECT d.*, u.telegram_id, u.first_name
+        FROM documents d
+        JOIN users u ON d.user_id = u.id
+        WHERE d.id = {p}
+    """, (doc_id,))
+    row = c.fetchone()
+    result = _row_to_dict(row, c)
+    conn.close()
+    return result
+
+
 def get_user_docs(tid: int) -> List[Dict]:
     conn = get_connection()
     c = conn.cursor()
@@ -1299,15 +1539,48 @@ def get_user_docs(tid: int) -> List[Dict]:
     return result
 
 
-def save_document(tid: int, doc_type: str, file_id: str, ocr_text: str = "", detected_type: str = "", score: int = 0, notes: str = ""):
+def save_document(
+    tid: int,
+    doc_type: str,
+    file_id: str,
+    ocr_text: str = "",
+    detected_type: str = "",
+    score: int = 0,
+    notes: str = "",
+    ai_analysis: str = "",
+    ai_confidence: float = 0.0,
+    ai_type: str = "",
+    extracted_name: str = "",
+    extracted_address: str = "",
+    extracted_date: str = "",
+    approved: int = 0,
+    document_country: str = "",
+    expiry_date: str = "",
+    issues: str = "",
+) -> int:
+    """Save document and return the document ID."""
     conn = get_connection()
     c = conn.cursor()
     p = db_param()
-    c.execute(f"""INSERT INTO documents (user_id, doc_type, file_id, ocr_text, detected_type, validation_score, validation_notes)
-        SELECT id, {p}, {p}, {p}, {p}, {p}, {p} FROM users WHERE telegram_id = {p}""",
-        (doc_type, file_id, ocr_text, detected_type, score, notes, tid))
+    c.execute(f"""INSERT INTO documents (
+        user_id, doc_type, file_id, ocr_text, detected_type, validation_score, validation_notes,
+        ai_analysis, ai_confidence, ai_type, extracted_name, extracted_address, extracted_date,
+        approved, document_country, expiry_date, issues
+    ) SELECT id, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}, {p}
+    FROM users WHERE telegram_id = {p}""",
+        (doc_type, file_id, ocr_text, detected_type, score, notes,
+         ai_analysis, ai_confidence, ai_type, extracted_name, extracted_address, extracted_date,
+         approved, document_country, expiry_date, issues, tid))
     conn.commit()
+
+    # Get the inserted document ID
+    if USE_POSTGRES:
+        c.execute("SELECT lastval()")
+    else:
+        c.execute("SELECT last_insert_rowid()")
+    doc_id = c.fetchone()[0]
     conn.close()
+    return doc_id
 
 
 def save_message(tid: int, direction: str, content: str, intent: str = ""):
@@ -2346,30 +2619,37 @@ async def show_main_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
     name = user.get("full_name") or user.get("first_name", "Usuario")
     case = get_or_create_case(update.effective_user.id)
-    dc = get_doc_count(update.effective_user.id)
+    tid = update.effective_user.id
+    dc_total = get_doc_count(tid)
+    dc_approved = get_approved_doc_count(tid)
 
-    # Dynamic progress bar
-    dc_temp = get_doc_count(update.effective_user.id)
+    # Dynamic progress bar (based on approved documents only)
     if user.get("phase4_paid"):
         progress = 95
     elif user.get("phase3_paid"):
         progress = 85
     elif user.get("phase2_paid"):
-        progress = min(75, 65 + dc_temp)
-    elif dc_temp >= MIN_DOCS_FOR_PHASE2:
-        progress = 50 + min(15, dc_temp * 2)
-    elif dc_temp > 0:
-        progress = 15 + (dc_temp * 10)
+        progress = min(75, 65 + dc_approved)
+    elif dc_approved >= MIN_DOCS_FOR_PHASE2:
+        progress = 50 + min(15, dc_approved * 2)
+    elif dc_approved > 0:
+        progress = 15 + (dc_approved * 10)
     else:
         progress = 10
     bar = "█" * (progress // 10) + "░" * (10 - progress // 10)
+
+    # Document status line
+    doc_status = f"Documentos aprobados: {dc_approved}"
+    if dc_total > dc_approved:
+        pending = dc_total - dc_approved
+        doc_status += f" (+ {pending} en revisión)"
 
     msg = (
         f"*{name}* — Expediente {case['case_number']}\n"
         f"Fase actual: {phase_name(user)}\n\n"
         f"Progreso: {bar} {progress}%\n"
-        f"Documentos subidos: {dc}\n"
-        f"{phase_status(user, dc)}\n\n"
+        f"{doc_status}\n"
+        f"{phase_status(user, dc_approved)}\n\n"
         f"Quedan {days_left()} días para el cierre del plazo."
     )
 
@@ -2828,67 +3108,155 @@ async def handle_photo_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) ->
     file_id = photo.file_id
     dtype = ctx.user_data.get("doc_type", "other")
     info = DOC_TYPES.get(dtype, DOC_TYPES["other"])
+    tid = update.effective_user.id
 
     # Processing message
-    processing_msg = await update.message.reply_text("🔍 Analizando documento…")
+    processing_msg = await update.message.reply_text("🔍 Analizando documento con IA…")
 
-    # Process document
+    # Download image
     try:
         file = await ctx.bot.get_file(photo.file_id)
-        result = await process_document(file, dtype)
+        photo_bytes = await file.download_as_bytearray()
     except Exception as e:
-        logger.error(f"Doc processing failed: {e}")
-        result = {"success": True, "detected_type": dtype, "ocr_text": "", "score": 40, "notes": ["Documento guardado."]}
+        logger.error(f"Failed to download photo: {e}")
+        await processing_msg.edit_text("❌ Error al descargar la imagen. Por favor, inténtelo de nuevo.")
+        return ST_UPLOAD_PHOTO
 
-    # Save
-    save_document(
-        update.effective_user.id, dtype, file_id,
-        ocr_text=result.get("ocr_text", ""),
-        detected_type=result.get("detected_type", ""),
-        score=result.get("score", 0),
-        notes="; ".join(result.get("notes", [])),
+    # Analyze with Claude Vision API
+    ai_result = await analyze_document_with_claude(bytes(photo_bytes))
+
+    # Also run OCR fallback for backup
+    ocr_result = {"ocr_text": "", "detected_type": dtype, "score": 50, "notes": []}
+    if OCR_AVAILABLE:
+        try:
+            image = Image.open(BytesIO(photo_bytes))
+            text = pytesseract.image_to_string(image, lang="spa+eng")
+            ocr_result["ocr_text"] = text[:2000]
+            ocr_result["detected_type"] = classify_document_ocr(text)
+        except Exception as e:
+            logger.error(f"OCR fallback failed: {e}")
+
+    # Determine confidence level and approval status
+    confidence = ai_result.get("confidence", 0.0)
+    ai_type = ai_result.get("type", "unknown")
+    issues = ai_result.get("issues", [])
+
+    # Auto-processing logic based on confidence
+    # High confidence (≥0.85): Auto-approve
+    # Medium confidence (0.6-0.85): Pending review
+    # Low confidence (<0.6): Ask user to re-upload
+
+    if confidence >= 0.85 and not issues:
+        approved = 1  # Auto-approved
+        status_text = "✅ Documento verificado y aprobado automáticamente."
+        score = 90
+    elif confidence >= 0.6:
+        approved = 0  # Pending review
+        status_text = "⏳ Documento recibido. Será revisado por nuestro equipo."
+        score = 60
+    else:
+        approved = 0  # Pending, but likely needs re-upload
+        status_text = "⚠️ No pudimos verificar este documento correctamente."
+        score = 30
+
+    # Detected document type from AI
+    detected_type = get_doc_type_from_ai(ai_type) if ai_type != "unknown" else ocr_result["detected_type"]
+
+    # Save document with AI analysis
+    doc_id = save_document(
+        tid=tid,
+        doc_type=dtype,
+        file_id=file_id,
+        ocr_text=ocr_result.get("ocr_text", ""),
+        detected_type=detected_type,
+        score=score,
+        notes="; ".join(issues) if issues else "",
+        ai_analysis=ai_result.get("raw_response", ""),
+        ai_confidence=confidence,
+        ai_type=ai_type,
+        extracted_name=ai_result.get("extracted_name") or "",
+        extracted_address=ai_result.get("extracted_address") or "",
+        extracted_date=ai_result.get("extracted_date") or "",
+        approved=approved,
+        document_country=ai_result.get("document_country") or "",
+        expiry_date=ai_result.get("expiry_date") or "",
+        issues="; ".join(issues) if issues else "",
     )
 
-    dc = get_doc_count(update.effective_user.id)
-    user = get_user(update.effective_user.id)
+    dc = get_doc_count(tid)
+    approved_count = get_approved_doc_count(tid)
+    user = get_user(tid)
 
-    # Build response
-    score = result.get("score", 0)
-    if score >= 70:
-        status_text = "✅ Documento aceptado."
-    elif score >= 40:
-        status_text = "⏳ Documento recibido. Será revisado por nuestro equipo."
-    else:
-        status_text = "⚠️ Hay un problema con este documento."
-
+    # Build notes text
     notes_text = ""
-    if result.get("notes"):
-        notes_text = "\n" + "\n".join(f"  · {n}" for n in result["notes"])
+    if issues:
+        notes_text = "\n\n*Observaciones:*\n" + "\n".join(f"  · {n}" for n in issues)
+
+    # Type mismatch warning
+    if detected_type != dtype and detected_type != "other":
+        detected_name = DOC_TYPES.get(detected_type, {}).get("name", detected_type)
+        expected_name = info["name"]
+        notes_text += f"\n\n⚠️ Esperábamos «{expected_name}» pero parece ser «{detected_name}»."
 
     # Phase 2 unlock message
     unlock = ""
-    if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
-        unlock = "\n\nYa puede desbloquear la *revisión legal completa* por €39."
+    if approved_count >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
+        unlock = "\n\n🎉 Ya puede desbloquear la *revisión legal completa* por €39."
 
-    await processing_msg.edit_text(
-        f"{status_text}\n\n"
-        f"Tipo: {info['name']}\n"
-        f"Documentos totales: {dc}"
-        f"{notes_text}{unlock}",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
-            [InlineKeyboardButton("Volver al menú", callback_data="back")],
-        ]),
-    )
+    # Different response based on confidence
+    if confidence < 0.6:
+        # Low confidence - suggest re-upload
+        await processing_msg.edit_text(
+            f"{status_text}\n\n"
+            f"Confianza del análisis: {int(confidence * 100)}%\n"
+            f"Tipo detectado: {DOC_TYPES.get(detected_type, {}).get('name', 'Desconocido')}"
+            f"{notes_text}\n\n"
+            "💡 *Sugerencia:* Por favor, envíe una foto más clara del documento, "
+            "asegurándose de que esté bien iluminado y se vea completo.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🔄 Enviar otra foto", callback_data=f"dt_{dtype}")],
+                [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
+                [InlineKeyboardButton("Volver al menú", callback_data="back")],
+            ]),
+        )
+    else:
+        await processing_msg.edit_text(
+            f"{status_text}\n\n"
+            f"Tipo: {info['name']}\n"
+            f"Documentos aprobados: {approved_count}\n"
+            f"Documentos totales: {dc}"
+            f"{notes_text}{unlock}",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
+                [InlineKeyboardButton("Volver al menú", callback_data="back")],
+            ]),
+        )
 
-    # Notify admins
-    await notify_admins(ctx,
-        f"📄 Documento subido\n"
-        f"Usuario: {user.get('first_name')} (TID: {update.effective_user.id})\n"
-        f"Tipo: {info['name']}\n"
-        f"Score: {score}/100\n"
-        f"Total docs: {dc}")
+    # Notify admins with AI analysis summary
+    ai_summary = ""
+    if ai_result.get("success"):
+        ai_summary = f"\n🤖 IA: {ai_type} ({int(confidence * 100)}%)"
+        if ai_result.get("extracted_name"):
+            ai_summary += f"\n   Nombre: {ai_result['extracted_name']}"
+        if issues:
+            ai_summary += f"\n   ⚠️ {', '.join(issues[:2])}"
+
+    # Different admin notification based on approval status
+    if approved == 1:
+        await notify_admins(ctx,
+            f"✅ Documento AUTO-APROBADO\n"
+            f"Usuario: {user.get('first_name')} (TID: {tid})\n"
+            f"Tipo: {info['name']}{ai_summary}\n"
+            f"Docs aprobados: {approved_count}")
+    else:
+        await notify_admins(ctx,
+            f"📄 Documento PENDIENTE de revisión\n"
+            f"Usuario: {user.get('first_name')} (TID: {tid})\n"
+            f"Tipo: {info['name']}{ai_summary}\n"
+            f"DocID: {doc_id}\n"
+            f"Use /pendientes para revisar")
 
     return ST_MAIN_MENU
 
@@ -3435,6 +3803,234 @@ async def handle_admin_doc_callback(update: Update, ctx: ContextTypes.DEFAULT_TY
         logger.error(f"Error in handle_admin_doc_callback: {e}")
 
 
+async def cmd_pendientes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin command to view pending documents: /pendientes"""
+    caller_id = update.effective_user.id
+    if caller_id not in ADMIN_IDS:
+        await update.message.reply_text(f"No autorizado. Tu ID: {caller_id}")
+        return
+
+    pending = get_pending_documents(limit=20)
+
+    if not pending:
+        await update.message.reply_text("✅ No hay documentos pendientes de revisión.")
+        return
+
+    msg = f"*📋 Documentos Pendientes* ({len(pending)})\n\n"
+
+    for doc in pending:
+        doc_id = doc.get('id')
+        tid = doc.get('telegram_id')
+        first_name = doc.get('first_name', 'Usuario')
+        doc_type = doc.get('doc_type', 'unknown')
+        ai_type = doc.get('ai_type', '')
+        confidence = doc.get('ai_confidence', 0) or 0
+        issues = doc.get('issues', '')
+
+        type_name = DOC_TYPES.get(doc_type, {}).get('name', doc_type)
+
+        # Confidence indicator
+        if confidence >= 0.6:
+            conf_icon = "🟡"
+        else:
+            conf_icon = "🔴"
+
+        msg += f"{conf_icon} *{type_name}*\n"
+        msg += f"   DocID: {doc_id} | TID: {tid}\n"
+        msg += f"   IA: {ai_type} ({int(confidence * 100)}%)\n"
+        if issues:
+            msg += f"   ⚠️ {issues[:50]}\n"
+        msg += "\n"
+
+    msg += "\n*Acciones:*\n"
+    msg += "• `/aprobar <doc_id>` - Aprobar documento\n"
+    msg += "• `/rechazar <doc_id>` - Rechazar documento\n"
+    msg += "• `/ver <doc_id>` - Ver documento\n"
+
+    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_aprobar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin command to approve a document: /aprobar <doc_id>"""
+    caller_id = update.effective_user.id
+    if caller_id not in ADMIN_IDS:
+        await update.message.reply_text(f"No autorizado. Tu ID: {caller_id}")
+        return
+
+    if not ctx.args:
+        await update.message.reply_text("Uso: /aprobar <doc_id>")
+        return
+
+    try:
+        doc_id = int(ctx.args[0])
+        doc = get_document_by_id(doc_id)
+
+        if not doc:
+            await update.message.reply_text(f"Documento {doc_id} no encontrado.")
+            return
+
+        if doc.get('approved') == 1:
+            await update.message.reply_text(f"Documento {doc_id} ya está aprobado.")
+            return
+
+        success = update_document_approval(doc_id, 1)
+        if success:
+            tid = doc.get('telegram_id')
+            doc_type = doc.get('doc_type', 'unknown')
+            type_name = DOC_TYPES.get(doc_type, {}).get('name', doc_type)
+
+            await update.message.reply_text(f"✅ Documento {doc_id} aprobado.\nTipo: {type_name}\nUsuario: {tid}")
+
+            # Notify user that their document was approved
+            try:
+                await ctx.bot.send_message(
+                    tid,
+                    f"✅ *Documento aprobado*\n\n"
+                    f"Su documento «{type_name}» ha sido revisado y aprobado por nuestro equipo.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify user {tid} of approval: {e}")
+        else:
+            await update.message.reply_text(f"Error al aprobar documento {doc_id}.")
+
+    except ValueError:
+        await update.message.reply_text("ID inválido. Uso: /aprobar <doc_id>")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_rechazar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin command to reject a document: /rechazar <doc_id> [motivo]"""
+    caller_id = update.effective_user.id
+    if caller_id not in ADMIN_IDS:
+        await update.message.reply_text(f"No autorizado. Tu ID: {caller_id}")
+        return
+
+    if not ctx.args:
+        await update.message.reply_text("Uso: /rechazar <doc_id> [motivo]")
+        return
+
+    try:
+        doc_id = int(ctx.args[0])
+        reason = " ".join(ctx.args[1:]) if len(ctx.args) > 1 else "Documento no válido o ilegible"
+
+        doc = get_document_by_id(doc_id)
+
+        if not doc:
+            await update.message.reply_text(f"Documento {doc_id} no encontrado.")
+            return
+
+        if doc.get('approved') == -1:
+            await update.message.reply_text(f"Documento {doc_id} ya está rechazado.")
+            return
+
+        success = update_document_approval(doc_id, -1)
+        if success:
+            tid = doc.get('telegram_id')
+            doc_type = doc.get('doc_type', 'unknown')
+            type_name = DOC_TYPES.get(doc_type, {}).get('name', doc_type)
+
+            await update.message.reply_text(f"❌ Documento {doc_id} rechazado.\nTipo: {type_name}\nUsuario: {tid}\nMotivo: {reason}")
+
+            # Notify user that their document was rejected
+            try:
+                await ctx.bot.send_message(
+                    tid,
+                    f"❌ *Documento rechazado*\n\n"
+                    f"Su documento «{type_name}» ha sido revisado y no puede ser aceptado.\n\n"
+                    f"*Motivo:* {reason}\n\n"
+                    f"Por favor, suba una nueva versión del documento.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify user {tid} of rejection: {e}")
+        else:
+            await update.message.reply_text(f"Error al rechazar documento {doc_id}.")
+
+    except ValueError:
+        await update.message.reply_text("ID inválido. Uso: /rechazar <doc_id> [motivo]")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_ver(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin command to view a document by ID: /ver <doc_id>"""
+    caller_id = update.effective_user.id
+    if caller_id not in ADMIN_IDS:
+        await update.message.reply_text(f"No autorizado. Tu ID: {caller_id}")
+        return
+
+    if not ctx.args:
+        await update.message.reply_text("Uso: /ver <doc_id>")
+        return
+
+    try:
+        doc_id = int(ctx.args[0])
+        doc = get_document_by_id(doc_id)
+
+        if not doc:
+            await update.message.reply_text(f"Documento {doc_id} no encontrado.")
+            return
+
+        # Build info message
+        tid = doc.get('telegram_id')
+        first_name = doc.get('first_name', 'Usuario')
+        doc_type = doc.get('doc_type', 'unknown')
+        type_name = DOC_TYPES.get(doc_type, {}).get('name', doc_type)
+        ai_type = doc.get('ai_type', 'N/A')
+        confidence = doc.get('ai_confidence', 0) or 0
+        extracted_name = doc.get('extracted_name', '')
+        extracted_address = doc.get('extracted_address', '')
+        extracted_date = doc.get('extracted_date', '')
+        issues = doc.get('issues', '')
+        approved = doc.get('approved', 0)
+
+        status_text = "✅ Aprobado" if approved == 1 else ("❌ Rechazado" if approved == -1 else "⏳ Pendiente")
+
+        msg = f"*📄 Documento #{doc_id}*\n\n"
+        msg += f"*Usuario:* {first_name} (TID: {tid})\n"
+        msg += f"*Tipo esperado:* {type_name}\n"
+        msg += f"*Tipo detectado:* {ai_type}\n"
+        msg += f"*Confianza IA:* {int(confidence * 100)}%\n"
+        msg += f"*Estado:* {status_text}\n\n"
+
+        if extracted_name:
+            msg += f"*Nombre extraído:* {extracted_name}\n"
+        if extracted_address:
+            msg += f"*Dirección:* {extracted_address[:100]}\n"
+        if extracted_date:
+            msg += f"*Fecha:* {extracted_date}\n"
+        if issues:
+            msg += f"\n⚠️ *Problemas:* {issues}\n"
+
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+
+        # Send the actual file
+        file_id = doc.get('file_id')
+        if file_id:
+            try:
+                await ctx.bot.send_document(
+                    update.effective_chat.id,
+                    file_id,
+                    caption=f"📄 {type_name} - Doc #{doc_id}"
+                )
+            except Exception:
+                try:
+                    await ctx.bot.send_photo(
+                        update.effective_chat.id,
+                        file_id,
+                        caption=f"📄 {type_name} - Doc #{doc_id}"
+                    )
+                except Exception as e:
+                    await update.message.reply_text(f"Error enviando archivo: {e}")
+
+    except ValueError:
+        await update.message.reply_text("ID inválido. Uso: /ver <doc_id>")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
 async def cmd_referidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     """Show referral stats for user."""
     tid = update.effective_user.id
@@ -3856,6 +4452,10 @@ def main():
     app.add_handler(CommandHandler("user", cmd_user), group=-1)
     app.add_handler(CommandHandler("docs", cmd_docs), group=-1)
     app.add_handler(CommandHandler("doc", cmd_doc), group=-1)
+    app.add_handler(CommandHandler("pendientes", cmd_pendientes), group=-1)
+    app.add_handler(CommandHandler("aprobar", cmd_aprobar), group=-1)
+    app.add_handler(CommandHandler("rechazar", cmd_rechazar), group=-1)
+    app.add_handler(CommandHandler("ver", cmd_ver), group=-1)
     app.add_handler(CallbackQueryHandler(handle_admin_doc_callback, pattern="^adoc_"), group=-1)
 
     # Schedule re-engagement reminders (runs every 6 hours)
