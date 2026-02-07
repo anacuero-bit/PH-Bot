@@ -3643,12 +3643,6 @@ def main():
         ],
     )
 
-    # Debug: log all incoming updates
-    async def log_update(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        if update.message and update.message.text:
-            logger.info(f"UPDATE RECEIVED: {update.message.text} from {update.effective_user.id}")
-    app.add_handler(MessageHandler(filters.ALL, log_update), group=-10)
-
     app.add_handler(conv)
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CommandHandler("referidos", cmd_referidos))
