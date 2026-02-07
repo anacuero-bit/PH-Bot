@@ -196,6 +196,11 @@ STRIPE_PHASE2_LINK = os.environ.get("STRIPE_PHASE2_LINK", "")  # Stripe payment 
 STRIPE_PHASE3_LINK = os.environ.get("STRIPE_PHASE3_LINK", "")  # Stripe payment link for €150
 STRIPE_PHASE4_LINK = os.environ.get("STRIPE_PHASE4_LINK", "")  # Stripe payment link for €110
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")  # Claude API for document analysis
+# Debug: log API key availability at startup (never log the key itself)
+logging.getLogger("ph-bot").info(
+    "ANTHROPIC config: AVAILABLE=%s, API_KEY set=%s, KEY length=%d",
+    ANTHROPIC_AVAILABLE, bool(ANTHROPIC_API_KEY), len(ANTHROPIC_API_KEY)
+)
 
 # Database: Use PostgreSQL if DATABASE_URL is set and connection works, otherwise SQLite
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -1419,11 +1424,14 @@ async def analyze_document_with_claude(image_bytes: bytes) -> Dict:
 
     response_text = ""
     try:
+        logger.info("DEBUG: Creating Anthropic client (key length=%d, starts_with=%s)",
+                     len(ANTHROPIC_API_KEY), ANTHROPIC_API_KEY[:8] + "..." if len(ANTHROPIC_API_KEY) > 8 else "SHORT")
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
         # Encode image to base64
         image_base64 = base64.b64encode(image_bytes).decode("utf-8")
-        logger.info(f"Sending image to Claude Vision API ({len(image_bytes)} bytes)")
+        logger.info("DEBUG: Sending image to Claude Vision API (%d bytes, base64 length=%d)",
+                     len(image_bytes), len(image_base64))
 
         # Determine media type (assume JPEG for photos from Telegram)
         media_type = "image/jpeg"
@@ -1489,18 +1497,27 @@ Problemas comunes a detectar:
         )
 
         # Parse the response
+        logger.info("DEBUG: API response received. stop_reason=%s, content_blocks=%d",
+                     message.stop_reason, len(message.content))
         response_text = message.content[0].text.strip()
-        logger.info(f"Claude Vision raw response: {response_text[:500]}")
+        logger.info("DEBUG: Raw response text (%d chars): %s", len(response_text), response_text[:800])
 
         # Extract JSON from response
         json_text = extract_json_from_response(response_text)
-        logger.info(f"Extracted JSON: {json_text[:300]}")
+        logger.info("DEBUG: Extracted JSON (%d chars): %s", len(json_text), json_text[:500])
 
-        analysis = json.loads(json_text)
+        try:
+            analysis = json.loads(json_text)
+        except json.JSONDecodeError as je:
+            logger.error("DEBUG: JSON parse FAILED at pos %d: %s", je.pos, je.msg)
+            logger.error("DEBUG: JSON text around error: ...%s...", json_text[max(0, je.pos-50):je.pos+50])
+            raise
+
+        logger.info("DEBUG: Parsed analysis keys: %s", list(analysis.keys()))
 
         # Ensure confidence is a float
         raw_confidence = analysis.get("confidence", 0)
-        logger.info(f"Raw confidence value: {raw_confidence} (type: {type(raw_confidence).__name__})")
+        logger.info("DEBUG: Raw confidence value: %r (type: %s)", raw_confidence, type(raw_confidence).__name__)
 
         if isinstance(raw_confidence, str):
             # Handle string like "0.85" or "85%"
@@ -1522,7 +1539,11 @@ Problemas comunes a detectar:
         analysis["success"] = True
         analysis["raw_response"] = response_text
 
-        logger.info(f"Claude Vision analysis: type={analysis.get('type')}, confidence={analysis['confidence']}")
+        logger.info("DEBUG: Final confidence after conversion: %f (type: %s)",
+                     analysis["confidence"], type(analysis["confidence"]).__name__)
+        logger.info("Claude Vision analysis: type=%s, confidence=%.2f, name=%s",
+                     analysis.get('type'), analysis['confidence'],
+                     analysis.get('extracted_name', 'N/A'))
         return analysis
 
     except json.JSONDecodeError as e:
@@ -1701,6 +1722,31 @@ def get_user_docs(tid: int) -> List[Dict]:
     result = [_row_to_dict(r, c) for r in rows]
     conn.close()
     return result
+
+
+def get_user_doc_by_type(tid: int, doc_type: str) -> Optional[Dict]:
+    """Get a user's existing document of a specific type, if any."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    c.execute(
+        f"SELECT d.* FROM documents d JOIN users u ON d.user_id=u.id "
+        f"WHERE u.telegram_id={p} AND d.doc_type={p} ORDER BY d.uploaded_at DESC LIMIT 1",
+        (tid, doc_type))
+    row = c.fetchone()
+    result = _row_to_dict(row, c)
+    conn.close()
+    return result
+
+
+def delete_document(doc_id: int):
+    """Delete a document by ID."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    c.execute(f"DELETE FROM documents WHERE id={p}", (doc_id,))
+    conn.commit()
+    conn.close()
 
 
 def save_document(
@@ -2942,9 +2988,43 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         dtype = d[3:]
         info = DOC_TYPES.get(dtype, DOC_TYPES["other"])
         ctx.user_data["doc_type"] = dtype
+        # Check for duplicate document (passport, nie, dni, antecedentes)
+        if dtype in ("passport", "nie", "dni", "antecedentes"):
+            existing = get_user_doc_by_type(update.effective_user.id, dtype)
+            if existing:
+                ctx.user_data["replace_doc_id"] = existing["id"]
+                await q.edit_message_text(
+                    f"Ya tienes un *{info['name']}* subido. ¿Quieres reemplazarlo?",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Sí, reemplazar", callback_data=f"repl_yes_{dtype}")],
+                        [InlineKeyboardButton("No, cancelar", callback_data="m_upload")],
+                    ]))
+                return ST_UPLOAD_SELECT
         tip = f"\n\n💡 {info['tip']}" if info.get("tip") else ""
         await q.edit_message_text(
             f"*Subir: {info['name']}*\n\n"
+            f"Envíe una fotografía clara del documento.{tip}\n\n"
+            "Consejos:\n"
+            "- Buena iluminación, sin sombras.\n"
+            "- Todo el documento visible.\n"
+            "- Texto legible.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("← Cancelar", callback_data="m_upload")],
+            ]))
+        return ST_UPLOAD_PHOTO
+
+    if d.startswith("repl_yes_"):
+        dtype = d[9:]
+        info = DOC_TYPES.get(dtype, DOC_TYPES["other"])
+        old_id = ctx.user_data.pop("replace_doc_id", None)
+        if old_id:
+            delete_document(old_id)
+        ctx.user_data["doc_type"] = dtype
+        tip = f"\n\n💡 {info['tip']}" if info.get("tip") else ""
+        await q.edit_message_text(
+            f"*Subir: {info['name']}* (reemplazo)\n\n"
             f"Envíe una fotografía clara del documento.{tip}\n\n"
             "Consejos:\n"
             "- Buena iluminación, sin sombras.\n"
@@ -3022,24 +3102,24 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
     if d == "m_contact":
         await q.edit_message_text(
-            "*Contacto con nuestro equipo*\n\n"
-            f"WhatsApp: {SUPPORT_PHONE}\n"
-            "Teléfono: +34 91 555 0123\n"
-            "Email: info@tuspapeles2026.es\n"
-            "Oficina: Calle Serrano 45, Madrid\n\n"
-            "Horario: lunes a viernes, 9:00–19:00.\n\n"
-            "También puede escribir su consulta aquí y la trasladaremos a un abogado:",
+            "*¿Tienes una consulta para nuestro equipo legal?*\n\n"
+            "Escribe tu mensaje aquí y lo trasladaremos a un abogado:",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Escribir consulta", callback_data="write_msg")],
                 [InlineKeyboardButton("← Volver", callback_data="back")],
             ]))
-        return ST_CONTACT
+        ctx.user_data["awaiting_human_msg"] = True
+        return ST_HUMAN_MSG
 
     if d == "write_msg":
         await q.edit_message_text(
-            "Escriba su consulta a continuación y la recibirá un miembro de nuestro equipo.\n\n"
-            "Responderemos en un plazo máximo de 24 horas laborables.")
+            "*¿Tienes una consulta para nuestro equipo legal?*\n\n"
+            "Escribe tu mensaje aquí y lo trasladaremos a un abogado:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("← Volver", callback_data="back")],
+            ]))
+        ctx.user_data["awaiting_human_msg"] = True
         return ST_HUMAN_MSG
 
     if d == "m_pay2":
@@ -3566,8 +3646,7 @@ async def handle_free_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
             f"País: {COUNTRIES.get(user.get('country_code', ''), {}).get('name', '?')}\n\n"
             f"Mensaje:\n{text[:800]}")
         await update.message.reply_text(
-            "Hemos recibido su consulta. Un miembro de nuestro equipo le responderá "
-            "a la mayor brevedad posible.",
+            "✓ Tu consulta ha sido enviada. Te responderemos pronto.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Volver al menú", callback_data="back")],
             ]))
@@ -3598,16 +3677,14 @@ async def handle_free_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
 
     if intent == "human":
         await update.message.reply_text(
-            f"Por supuesto. Puede contactar con nuestro equipo:\n\n"
-            f"WhatsApp: {SUPPORT_PHONE}\n"
-            f"Teléfono: +34 91 555 0123\n"
-            f"Email: info@tuspapeles2026.es\n\n"
-            "O escriba su consulta aquí y se la trasladamos a un abogado.",
+            "*¿Tienes una consulta para nuestro equipo legal?*\n\n"
+            "Escribe tu mensaje aquí y lo trasladaremos a un abogado:",
+            parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Escribir consulta", callback_data="write_msg")],
-                [InlineKeyboardButton("Volver al menú", callback_data="back")],
+                [InlineKeyboardButton("← Volver al menú", callback_data="back")],
             ]))
-        return ST_CONTACT
+        ctx.user_data["awaiting_human_msg"] = True
+        return ST_HUMAN_MSG
 
     if intent == "price":
         await update.message.reply_text(FAQ["costo"]["text"], parse_mode=ParseMode.MARKDOWN,
@@ -4639,20 +4716,15 @@ async def cmd_ayuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 async def cmd_contacto(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     """Start human contact flow: /contacto"""
     await update.message.reply_text(
-        "*Contacto con nuestro equipo*\n\n"
-        f"WhatsApp: {SUPPORT_PHONE}\n"
-        "Teléfono: +34 91 555 0123\n"
-        "Email: info@tuspapeles2026.es\n"
-        "Oficina: Calle Serrano 45, Madrid\n\n"
-        "Horario: lunes a viernes, 9:00–19:00.\n\n"
-        "También puede escribir su consulta aquí y la trasladaremos a un abogado:",
+        "*¿Tienes una consulta para nuestro equipo legal?*\n\n"
+        "Escribe tu mensaje aquí y lo trasladaremos a un abogado:",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Escribir consulta", callback_data="write_msg")],
             [InlineKeyboardButton("← Menú", callback_data="m_menu")],
         ]),
     )
-    return ST_CONTACT
+    ctx.user_data["awaiting_human_msg"] = True
+    return ST_HUMAN_MSG
 
 
 # =============================================================================
