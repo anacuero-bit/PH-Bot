@@ -3414,6 +3414,142 @@ async def cmd_referidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     return ST_MAIN_MENU
 
 
+async def cmd_estado(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show user's case status: /estado"""
+    tid = update.effective_user.id
+    user = get_user(tid)
+
+    if not user:
+        await update.message.reply_text(
+            "No tiene una cuenta registrada.\n"
+            "Escriba /start para comenzar.",
+        )
+        return ConversationHandler.END
+
+    # Get case and docs info
+    case = get_or_create_case(tid)
+    docs = get_user_docs(tid)
+
+    # Determine phase status
+    phase = user.get('current_phase', 1)
+    phase_names = {
+        1: "Registro",
+        2: "Revisión de documentos",
+        3: "Preparación de expediente",
+        4: "Presentación",
+    }
+    phase_name = phase_names.get(phase, "Registro")
+
+    # Payment status
+    payments = []
+    if user.get('phase2_paid'):
+        payments.append("Fase 2 ✓")
+    if user.get('phase3_paid'):
+        payments.append("Fase 3 ✓")
+    if user.get('phase4_paid'):
+        payments.append("Fase 4 ✓")
+    payment_status = " | ".join(payments) if payments else "Sin pagos realizados"
+
+    # Progress bar
+    progress = case.get('progress', 0)
+    filled = int(progress / 10)
+    bar = "█" * filled + "░" * (10 - filled)
+
+    await update.message.reply_text(
+        f"*Estado de su expediente*\n\n"
+        f"📋 Expediente: `{case.get('case_number', 'N/A')}`\n"
+        f"📊 Fase actual: {phase_name}\n"
+        f"💳 Pagos: {payment_status}\n"
+        f"📄 Documentos: {len(docs)} subidos\n"
+        f"📈 Progreso: {bar} {progress}%\n\n"
+        f"{'✅ Expediente listo para presentar' if user.get('expediente_ready') else '⏳ En proceso'}",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📄 Ver documentos", callback_data="m_docs")],
+            [InlineKeyboardButton("📞 Contactar", callback_data="m_contact")],
+            [InlineKeyboardButton("← Menú", callback_data="m_menu")],
+        ]),
+    )
+    return ST_MAIN_MENU
+
+
+async def cmd_documentos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show user's uploaded documents: /documentos"""
+    tid = update.effective_user.id
+    user = get_user(tid)
+
+    if not user:
+        await update.message.reply_text(
+            "No tiene una cuenta registrada.\n"
+            "Escriba /start para comenzar.",
+        )
+        return ConversationHandler.END
+
+    docs = get_user_docs(tid)
+
+    if not docs:
+        await update.message.reply_text(
+            "No ha subido ningún documento todavía.\n\n"
+            "Use el menú para subir sus documentos.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📄 Subir documentos", callback_data="m_docs")],
+                [InlineKeyboardButton("← Menú", callback_data="m_menu")],
+            ]),
+        )
+        return ST_MAIN_MENU
+
+    # Build document list
+    msg = f"*Sus documentos* ({len(docs)} total)\n\n"
+    for i, doc in enumerate(docs, 1):
+        doc_type = doc.get('doc_type', 'Documento')
+        status = doc.get('status', 'pending')
+        status_icon = "✅" if status == 'approved' else ("❌" if status == 'rejected' else "⏳")
+        status_text = "Aprobado" if status == 'approved' else ("Rechazado" if status == 'rejected' else "Pendiente")
+        uploaded = str(doc.get('uploaded_at', ''))[:10]
+
+        msg += f"{i}. {status_icon} *{doc_type}*\n"
+        msg += f"   Estado: {status_text} | {uploaded}\n\n"
+
+    await update.message.reply_text(
+        msg,
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📄 Subir más documentos", callback_data="m_docs")],
+            [InlineKeyboardButton("← Menú", callback_data="m_menu")],
+        ]),
+    )
+    return ST_MAIN_MENU
+
+
+async def cmd_ayuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show FAQ menu: /ayuda"""
+    await update.message.reply_text(
+        "*Preguntas frecuentes*\n\nSeleccione un tema:",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=faq_menu_kb(),
+    )
+    return ST_FAQ_MENU
+
+
+async def cmd_contacto(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start human contact flow: /contacto"""
+    await update.message.reply_text(
+        "*Contacto con nuestro equipo*\n\n"
+        f"WhatsApp: {SUPPORT_PHONE}\n"
+        "Teléfono: +34 91 555 0123\n"
+        "Email: info@tuspapeles2026.es\n"
+        "Oficina: Calle Serrano 45, Madrid\n\n"
+        "Horario: lunes a viernes, 9:00–19:00.\n\n"
+        "También puede escribir su consulta aquí y la trasladaremos a un abogado:",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Escribir consulta", callback_data="write_msg")],
+            [InlineKeyboardButton("← Menú", callback_data="m_menu")],
+        ]),
+    )
+    return ST_CONTACT
+
+
 # =============================================================================
 # RE-ENGAGEMENT REMINDERS (Job Queue)
 # =============================================================================
@@ -3644,9 +3780,16 @@ def main():
     )
 
     app.add_handler(conv)
-    app.add_handler(CommandHandler("reset", cmd_reset))
+
+    # Public commands
     app.add_handler(CommandHandler("referidos", cmd_referidos))
+    app.add_handler(CommandHandler("estado", cmd_estado))
+    app.add_handler(CommandHandler("documentos", cmd_documentos))
+    app.add_handler(CommandHandler("ayuda", cmd_ayuda))
+    app.add_handler(CommandHandler("contacto", cmd_contacto))
+
     # Admin commands - use group=-1 for higher priority than ConversationHandler
+    app.add_handler(CommandHandler("reset", cmd_reset), group=-1)
     app.add_handler(CommandHandler("approve2", cmd_approve2), group=-1)
     app.add_handler(CommandHandler("approve3", cmd_approve3), group=-1)
     app.add_handler(CommandHandler("approve4", cmd_approve4), group=-1)
