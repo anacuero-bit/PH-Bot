@@ -3230,6 +3230,134 @@ async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Enviado: {sent} | Fallido: {failed}")
 
 
+async def cmd_user(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin views user profile: /user <telegram_id>"""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    if not ctx.args:
+        await update.message.reply_text("Uso: /user <telegram_id>")
+        return
+    try:
+        tid = int(ctx.args[0])
+        user = get_user(tid)
+        if not user:
+            await update.message.reply_text(f"Usuario {tid} no encontrado.")
+            return
+
+        # Get case info
+        case = get_or_create_case(tid)
+        docs = get_user_docs(tid)
+
+        # Get country name
+        country_code = user.get('country_code', '')
+        country = COUNTRIES.get(country_code, {})
+        country_name = f"{country.get('flag', '')} {country.get('name', country_code)}" if country else country_code
+
+        # Build status text
+        phases = []
+        if user.get('phase2_paid'):
+            phases.append("P2 ✓")
+        if user.get('phase3_paid'):
+            phases.append("P3 ✓")
+        if user.get('phase4_paid'):
+            phases.append("P4 ✓")
+        phase_status = " | ".join(phases) if phases else "Sin pagos"
+
+        # Referral info
+        ref_code = user.get('referral_code', 'N/A')
+        referred_by = user.get('referred_by_code', 'N/A')
+        credits_earned = float(user.get('referral_credits_earned') or 0)
+        credits_used = float(user.get('referral_credits_used') or 0)
+
+        msg = (
+            f"*Usuario: {tid}*\n\n"
+            f"Nombre: {user.get('full_name') or user.get('first_name') or 'N/A'}\n"
+            f"País: {country_name}\n"
+            f"Elegible: {'Sí' if user.get('eligible') else 'No'}\n"
+            f"Fase actual: {user.get('current_phase', 1)}\n"
+            f"Pagos: {phase_status}\n"
+            f"Expediente listo: {'Sí' if user.get('expediente_ready') else 'No'}\n\n"
+            f"*Expediente:* {case.get('case_number', 'N/A')}\n"
+            f"Estado: {case.get('status', 'N/A')}\n"
+            f"Progreso: {case.get('progress', 0)}%\n\n"
+            f"*Referidos:*\n"
+            f"Código: `{ref_code}`\n"
+            f"Referido por: {referred_by}\n"
+            f"Créditos: €{credits_earned:.0f} ganados, €{credits_used:.0f} usados\n\n"
+            f"*Documentos:* {len(docs)} subidos\n"
+            f"Creado: {str(user.get('created_at', 'N/A'))[:19]}"
+        )
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    except ValueError:
+        await update.message.reply_text("ID inválido. Uso: /user <telegram_id>")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_docs(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin views user documents: /docs <telegram_id>"""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    if not ctx.args:
+        await update.message.reply_text("Uso: /docs <telegram_id>")
+        return
+    try:
+        tid = int(ctx.args[0])
+        user = get_user(tid)
+        if not user:
+            await update.message.reply_text(f"Usuario {tid} no encontrado.")
+            return
+
+        docs = get_user_docs(tid)
+        if not docs:
+            await update.message.reply_text(f"Usuario {tid} no tiene documentos.")
+            return
+
+        # Build document list
+        msg = f"*Documentos de {tid}*\n({len(docs)} total)\n\n"
+        for i, doc in enumerate(docs, 1):
+            doc_type = doc.get('doc_type', 'unknown')
+            detected = doc.get('detected_type', '')
+            status = doc.get('status', 'pending')
+            file_id = doc.get('file_id', 'N/A')
+            uploaded = str(doc.get('uploaded_at', ''))[:10]
+
+            status_icon = "✓" if status == 'approved' else ("✗" if status == 'rejected' else "○")
+            detected_str = f" → {detected}" if detected and detected != doc_type else ""
+
+            msg += f"{i}. {status_icon} *{doc_type}*{detected_str}\n"
+            msg += f"   `{file_id[:40]}...`\n"
+            msg += f"   {uploaded}\n\n"
+
+        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    except ValueError:
+        await update.message.reply_text("ID inválido. Uso: /docs <telegram_id>")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_doc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin views a specific document file: /doc <file_id>"""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    if not ctx.args:
+        await update.message.reply_text("Uso: /doc <file_id>")
+        return
+    try:
+        file_id = ctx.args[0]
+        # Try to send the file back to admin
+        try:
+            await ctx.bot.send_document(update.effective_chat.id, file_id)
+        except Exception:
+            # If not a document, try as photo
+            try:
+                await ctx.bot.send_photo(update.effective_chat.id, file_id)
+            except Exception as e:
+                await update.message.reply_text(f"No se pudo enviar el archivo: {e}")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
 async def cmd_referidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     """Show referral stats for user."""
     tid = update.effective_user.id
@@ -3517,6 +3645,9 @@ def main():
     app.add_handler(CommandHandler("reply", cmd_reply))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
+    app.add_handler(CommandHandler("user", cmd_user))
+    app.add_handler(CommandHandler("docs", cmd_docs))
+    app.add_handler(CommandHandler("doc", cmd_doc))
 
     # Schedule re-engagement reminders (runs every 6 hours)
     job_queue = app.job_queue
