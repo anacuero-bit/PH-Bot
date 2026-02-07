@@ -202,6 +202,7 @@ PRICING = {
 (
     ST_WELCOME,
     ST_COUNTRY,
+    ST_FULL_NAME,
     ST_Q1_DATE,
     ST_Q2_TIME,
     ST_Q3_RECORD,
@@ -220,7 +221,7 @@ PRICING = {
     ST_CONTACT,
     ST_HUMAN_MSG,
     ST_ENTER_REFERRAL_CODE,
-) = range(20)
+) = range(21)
 
 # =============================================================================
 # REFERRAL SYSTEM
@@ -1374,9 +1375,23 @@ def find_faq_match(text: str) -> Optional[Dict]:
 import random
 import string
 
-def generate_referral_code(first_name: str) -> str:
-    """Generate unique referral code: NAME-XXXX"""
-    clean_name = ''.join(c for c in first_name.upper() if c.isalpha())[:8]
+def generate_referral_code(user_id: int) -> str:
+    """Generate unique referral code: NAME-XXXX
+
+    Checks in order: full_name, first_name, Telegram first_name, "USER"
+    """
+    # Get user data to find the best name
+    user = get_user(user_id)
+
+    # Priority: full_name -> first_name -> "USER"
+    name = None
+    if user.get('full_name'):
+        # Use first word of full name
+        name = user['full_name'].split()[0]
+    elif user.get('first_name'):
+        name = user['first_name']
+
+    clean_name = ''.join(c for c in (name or '').upper() if c.isalpha())[:8]
     if not clean_name:
         clean_name = "USER"
 
@@ -1876,6 +1891,7 @@ def main_menu_kb(user: Dict) -> InlineKeyboardMarkup:
     elif user.get("phase3_paid") and not user.get("phase4_paid") and user.get("expediente_ready"):
         btns.append([InlineKeyboardButton("🔓 Presentación — €110", callback_data="m_pay4")])
     btns += [
+        [InlineKeyboardButton("👥 Mis referidos", callback_data="m_referidos")],
         [InlineKeyboardButton("💰 Costos y pagos", callback_data="m_price")],
         [InlineKeyboardButton("❓ Preguntas frecuentes", callback_data="m_faq")],
         [InlineKeyboardButton("📞 Hablar con nuestro equipo", callback_data="m_contact")],
@@ -2121,15 +2137,32 @@ async def handle_country(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
     await q.edit_message_text(
         f"Gracias. Hemos registrado su nacionalidad: {country['flag']} {country['name']}.\n\n"
-        "A continuación, necesitamos hacerle *3 preguntas breves* para verificar "
-        "si cumple los requisitos básicos de la regularización.\n\n"
-        "Sus respuestas son estrictamente confidenciales.",
+        "¿Cómo te llamas? Escribe tu nombre completo:",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+    return ST_FULL_NAME
+
+
+async def handle_full_name(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle user's full name input."""
+    name = update.message.text.strip()
+    if len(name) < 2:
+        await update.message.reply_text("Por favor, escribe tu nombre completo:")
+        return ST_FULL_NAME
+
+    update_user(update.effective_user.id, full_name=name)
+
+    await update.message.reply_text(
+        f"Gracias, {name.split()[0]}.\n\n"
+        "A continuación, necesitamos hacerte *3 preguntas breves* para verificar "
+        "si cumples los requisitos básicos de la regularización.\n\n"
+        "Tus respuestas son estrictamente confidenciales.",
         parse_mode=ParseMode.MARKDOWN,
     )
 
-    await q.message.reply_text(
+    await update.message.reply_text(
         "*Pregunta 1 de 3*\n\n"
-        "¿Se encontraba usted en España *antes del 31 de diciembre de 2025*?",
+        "¿Te encontrabas en España *antes del 31 de diciembre de 2025*?",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Sí, llegué antes de esa fecha", callback_data="d_yes")],
@@ -2269,7 +2302,7 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     # Generate referral code for user
     user = get_user(tid)
     if not user.get('referral_code'):
-        code = generate_referral_code(user.get('first_name', 'USER'))
+        code = generate_referral_code(tid)
         update_user(tid, referral_code=code)
     else:
         code = user['referral_code']
@@ -2457,6 +2490,58 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("← Volver", callback_data="back")],
             ]))
+        return ST_MAIN_MENU
+
+    if d == "m_referidos":
+        tid = update.effective_user.id
+        stats = get_referral_stats(tid)
+
+        if not stats or not stats['code']:
+            await q.edit_message_text(
+                "Aún no tienes código de referidos.\n"
+                "Completa la verificación de elegibilidad primero.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("← Volver", callback_data="back")],
+                ]),
+            )
+            return ST_MAIN_MENU
+
+        # Simple status line
+        if not stats['can_earn']:
+            status = "Paga €39 para activar tus ganancias por referidos."
+        elif stats['credits_available'] >= REFERRAL_CREDIT_CAP:
+            status = "Has alcanzado el máximo. Ahora ganas 10% en efectivo."
+        else:
+            remaining = REFERRAL_CREDIT_CAP - stats['credits_earned']
+            needed = remaining // REFERRAL_CREDIT_AMOUNT
+            status = f"Te faltan {needed} amigos para servicio gratis."
+
+        # Referral list (simple)
+        ref_list = ""
+        if stats['referrals']:
+            ref_list = "\nReferidos:\n"
+            for r in stats['referrals'][:5]:
+                status_icon = "pagado" if r.get('status') != 'registered' else "pendiente"
+                credit = f" +€{r.get('credit_amount', 0)}" if r.get('credit_amount') else ""
+                ref_list += f"- {r.get('referred_name', 'Usuario')} ({status_icon}){credit}\n"
+
+        wa_url = get_whatsapp_share_url(stats['code'])
+
+        await q.edit_message_text(
+            f"*Tus referidos*\n\n"
+            f"Tu código: `{stats['code']}`\n\n"
+            f"Referidos que han pagado: {stats['count']}\n"
+            f"Crédito ganado: €{stats['credits_earned']}\n"
+            f"Crédito usado: €{stats['credits_used']}\n"
+            f"Disponible: €{stats['credits_available']}\n\n"
+            f"{status}"
+            f"{ref_list}",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📱 Compartir por WhatsApp", url=wa_url)],
+                [InlineKeyboardButton("← Volver", callback_data="back")],
+            ]),
+        )
         return ST_MAIN_MENU
 
     if d == "m_faq":
@@ -3330,6 +3415,10 @@ def main():
             ST_COUNTRY: [
                 CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_country, pattern="^c_"),
+            ],
+            ST_FULL_NAME: [
+                CommandHandler("reset", cmd_reset),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_full_name),
             ],
             ST_Q1_DATE: [
                 CommandHandler("reset", cmd_reset),
