@@ -3319,23 +3319,37 @@ async def cmd_docs(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(f"Usuario {tid} no tiene documentos.")
             return
 
-        # Build document list
+        # Store docs for callback retrieval
+        if 'admin_docs' not in ctx.user_data:
+            ctx.user_data['admin_docs'] = {}
+        ctx.user_data['admin_docs'][tid] = docs
+
+        # Build document list with buttons
         msg = f"*Documentos de {tid}*\n({len(docs)} total)\n\n"
-        for i, doc in enumerate(docs, 1):
+        buttons = []
+        for i, doc in enumerate(docs):
             doc_type = doc.get('doc_type', 'unknown')
             detected = doc.get('detected_type', '')
             status = doc.get('status', 'pending')
-            file_id = doc.get('file_id', 'N/A')
             uploaded = str(doc.get('uploaded_at', ''))[:10]
 
             status_icon = "✓" if status == 'approved' else ("✗" if status == 'rejected' else "○")
             detected_str = f" → {detected}" if detected and detected != doc_type else ""
 
-            msg += f"{i}. {status_icon} *{doc_type}*{detected_str}\n"
-            msg += f"   `{file_id[:40]}...`\n"
+            msg += f"{i+1}. {status_icon} *{doc_type}*{detected_str}\n"
             msg += f"   {uploaded}\n\n"
 
-        await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+            # Add button for this document
+            buttons.append([InlineKeyboardButton(
+                f"📄 {i+1}. {doc_type[:20]}",
+                callback_data=f"adoc_{tid}_{i}"
+            )])
+
+        await update.message.reply_text(
+            msg,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
     except ValueError:
         await update.message.reply_text("ID inválido. Uso: /docs <telegram_id>")
     except Exception as e:
@@ -3364,6 +3378,61 @@ async def cmd_doc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text(f"No se pudo enviar el archivo: {e}")
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
+
+
+async def handle_admin_doc_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle admin document retrieval button clicks: adoc_{tid}_{index}"""
+    q = update.callback_query
+    await q.answer()
+
+    caller_id = update.effective_user.id
+    if caller_id not in ADMIN_IDS:
+        return
+
+    try:
+        # Parse callback data: adoc_{tid}_{index}
+        parts = q.data.split("_")
+        tid = int(parts[1])
+        idx = int(parts[2])
+
+        # Get docs from stored data or fetch fresh
+        docs = None
+        if 'admin_docs' in ctx.user_data and tid in ctx.user_data['admin_docs']:
+            docs = ctx.user_data['admin_docs'][tid]
+        else:
+            docs = get_user_docs(tid)
+
+        if not docs or idx >= len(docs):
+            await q.message.reply_text("Documento no encontrado. Use /docs de nuevo.")
+            return
+
+        doc = docs[idx]
+        file_id = doc.get('file_id')
+        doc_type = doc.get('doc_type', 'unknown')
+
+        if not file_id:
+            await q.message.reply_text("No hay file_id para este documento.")
+            return
+
+        # Try to send the file
+        try:
+            await ctx.bot.send_document(
+                q.message.chat_id,
+                file_id,
+                caption=f"📄 {doc_type} - Usuario {tid}"
+            )
+        except Exception:
+            # If not a document, try as photo
+            try:
+                await ctx.bot.send_photo(
+                    q.message.chat_id,
+                    file_id,
+                    caption=f"📄 {doc_type} - Usuario {tid}"
+                )
+            except Exception as e:
+                await q.message.reply_text(f"Error enviando archivo: {e}")
+    except Exception as e:
+        logger.error(f"Error in handle_admin_doc_callback: {e}")
 
 
 async def cmd_referidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
@@ -3800,6 +3869,7 @@ def main():
     app.add_handler(CommandHandler("user", cmd_user), group=-1)
     app.add_handler(CommandHandler("docs", cmd_docs), group=-1)
     app.add_handler(CommandHandler("doc", cmd_doc), group=-1)
+    app.add_handler(CallbackQueryHandler(handle_admin_doc_callback, pattern="^adoc_"), group=-1)
 
     # Schedule re-engagement reminders (runs every 6 hours)
     job_queue = app.job_queue
