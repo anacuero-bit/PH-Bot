@@ -3744,103 +3744,90 @@ def main():
         entry_points=[
             CommandHandler("start", cmd_start),
             CommandHandler("menu", cmd_menu),
-            CommandHandler("reset", cmd_reset),
+            CommandHandler("estado", cmd_estado),
+            CommandHandler("documentos", cmd_documentos),
             CommandHandler("referidos", cmd_referidos),
+            CommandHandler("ayuda", cmd_ayuda),
+            CommandHandler("contacto", cmd_contacto),
         ],
         states={
             ST_ENTER_REFERRAL_CODE: [
-                CommandHandler("reset", cmd_reset),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_referral_code_text),
                 CallbackQueryHandler(handle_referral_callbacks, pattern="^ref_"),
             ],
             ST_COUNTRY: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_country, pattern="^c_"),
             ],
             ST_FULL_NAME: [
-                CommandHandler("reset", cmd_reset),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_full_name),
             ],
             ST_Q1_DATE: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_q1),
             ],
             ST_Q2_TIME: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_q2),
             ],
             ST_Q3_RECORD: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_q3),
             ],
             ST_ELIGIBLE: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
             ],
             ST_NOT_ELIGIBLE: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
             ],
             ST_SERVICE_INFO: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
             ],
             ST_FAQ_MENU: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_faq_menu),
             ],
             ST_FAQ_ITEM: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_faq_menu),
             ],
             ST_MAIN_MENU: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text),
                 MessageHandler(filters.PHOTO, handle_photo_upload),
                 MessageHandler(filters.Document.ALL, handle_file_upload),
             ],
             ST_DOCS_LIST: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
             ],
             ST_UPLOAD_SELECT: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
             ],
             ST_UPLOAD_PHOTO: [
-                CommandHandler("reset", cmd_reset),
                 MessageHandler(filters.PHOTO, handle_photo_upload),
                 MessageHandler(filters.Document.ALL, handle_file_upload),
                 CallbackQueryHandler(handle_menu),
             ],
             ST_PAY_PHASE2: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
             ],
             ST_PAY_PHASE3: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
             ],
             ST_PAY_PHASE4: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
             ],
             ST_CONTACT: [
-                CommandHandler("reset", cmd_reset),
                 CallbackQueryHandler(handle_menu),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text),
             ],
             ST_HUMAN_MSG: [
-                CommandHandler("reset", cmd_reset),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_human_msg),
                 CallbackQueryHandler(handle_menu),
             ],
         },
         fallbacks=[
             CommandHandler("start", cmd_start),
-            CommandHandler("reset", cmd_reset),
             CommandHandler("menu", cmd_menu),
+            CommandHandler("estado", cmd_estado),
+            CommandHandler("documentos", cmd_documentos),
+            CommandHandler("referidos", cmd_referidos),
+            CommandHandler("ayuda", cmd_ayuda),
+            CommandHandler("contacto", cmd_contacto),
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text),
             MessageHandler(filters.PHOTO, handle_photo_upload),
             MessageHandler(filters.Document.ALL, handle_file_upload),
