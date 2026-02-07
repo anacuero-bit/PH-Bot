@@ -1056,6 +1056,7 @@ def init_db():
             intent TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
+        conn.commit()
         logger.info("Database: PostgreSQL initialized")
     else:
         # SQLite schema
@@ -1116,6 +1117,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )""")
+        conn.commit()
         logger.info("Database: SQLite initialized")
 
     # Add referral columns to users table (both PostgreSQL and SQLite)
@@ -1132,8 +1134,9 @@ def init_db():
     for col_name, col_type in referral_columns:
         try:
             c.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+            conn.commit()
         except Exception:
-            pass  # Column already exists
+            conn.rollback()  # Reset transaction state for PostgreSQL
 
     # Create referrals table
     if USE_POSTGRES:
@@ -1164,6 +1167,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(referrer_user_id, referred_user_id)
         )""")
+    conn.commit()
 
     # Create referral_events table for audit
     if USE_POSTGRES:
@@ -1184,13 +1188,15 @@ def init_db():
             description TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
+    conn.commit()
 
     # Create indexes for referral system
     try:
         c.execute("CREATE INDEX IF NOT EXISTS idx_users_referral_code ON users(referral_code)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_referrals_code ON referrals(referrer_code)")
+        conn.commit()
     except Exception:
-        pass
+        conn.rollback()
 
     conn.commit()
     conn.close()
