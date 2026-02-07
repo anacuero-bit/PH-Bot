@@ -1,13 +1,30 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v5.3.0 — Client Intake & Case Management
+PH-Bot v5.3.1 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
 Updated:    2026-02-07
 
 CHANGELOG:
 ----------
+v5.3.1 (2026-02-07)
+  - BUGFIXES:
+  - FIXED: AI confidence always showing 0% - improved JSON parsing with:
+      - Better markdown code block stripping (```json, etc.)
+      - Robust JSON extraction from response text
+      - Explicit float conversion for confidence values
+      - Detailed logging for debugging
+  - FIXED: /pendientes now shows documents with inline action buttons:
+      - [✓ Aprobar] [✗ Rechazar] buttons for quick actions
+      - [🔄 Pedir nueva foto] for resubmission requests
+      - [⏭ Siguiente] to skip to next document
+      - Document image sent with each pending item
+      - Rejection reason selection with predefined options
+      - Auto-advance to next pending doc after action
+  - FIXED: Admin notification missing user name - now shows:
+      - full_name (if set) or first_name or Telegram name as fallback
+
 v5.3.0 (2026-02-07)
   - AI DOCUMENT ANALYSIS:
   - ADDED: Claude Vision API integration for document classification
@@ -1269,12 +1286,37 @@ def init_db():
 # CLAUDE VISION API DOCUMENT ANALYSIS
 # =============================================================================
 
+def extract_json_from_response(text: str) -> str:
+    """Extract JSON from response, handling markdown code blocks."""
+    text = text.strip()
+
+    # Handle markdown code blocks: ```json, ```JSON, ``` etc.
+    if text.startswith("```"):
+        lines = text.split("\n")
+        # Remove first line (```json or ```)
+        lines = lines[1:]
+        # Remove last line if it's just ```
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines)
+
+    # Also try to find JSON object if there's text before/after
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start != -1 and end > start:
+        text = text[start:end]
+
+    return text.strip()
+
+
 async def analyze_document_with_claude(image_bytes: bytes) -> Dict:
     """
     Analyze a document image using Claude Vision API.
     Returns structured analysis with type, confidence, and extracted data.
     """
     if not ANTHROPIC_AVAILABLE or not ANTHROPIC_API_KEY:
+        logger.warning("Claude Vision API not available: ANTHROPIC_AVAILABLE=%s, API_KEY set=%s",
+                      ANTHROPIC_AVAILABLE, bool(ANTHROPIC_API_KEY))
         return {
             "success": False,
             "error": "Claude Vision API not available",
@@ -1282,28 +1324,33 @@ async def analyze_document_with_claude(image_bytes: bytes) -> Dict:
             "confidence": 0.0,
         }
 
+    response_text = ""
     try:
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
         # Encode image to base64
         image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+        logger.info(f"Sending image to Claude Vision API ({len(image_bytes)} bytes)")
 
         # Determine media type (assume JPEG for photos from Telegram)
         media_type = "image/jpeg"
 
-        prompt = """Analiza este documento y devuelve SOLO JSON válido sin texto adicional:
+        prompt = """Analiza este documento y devuelve SOLO un objeto JSON válido, sin texto adicional ni bloques de código:
+
 {
     "type": "passport|nie|dni|utility_bill|bank_statement|rental_contract|work_contract|antecedentes|empadronamiento|other",
-    "confidence": 0.0-1.0,
-    "is_identity_document": true/false,
-    "is_proof_of_residency": true/false,
-    "extracted_name": "nombre completo o null",
-    "extracted_address": "dirección completa o null",
-    "extracted_date": "fecha relevante (emisión/vencimiento) o null",
-    "document_country": "código país ISO o null",
-    "expiry_date": "fecha vencimiento o null",
-    "issues": ["lista de problemas detectados si hay alguno"]
+    "confidence": 0.85,
+    "is_identity_document": true,
+    "is_proof_of_residency": false,
+    "extracted_name": "Juan García López",
+    "extracted_address": null,
+    "extracted_date": "2024-01-15",
+    "document_country": "ES",
+    "expiry_date": "2030-01-15",
+    "issues": []
 }
+
+IMPORTANTE: El campo "confidence" debe ser un número decimal entre 0.0 y 1.0 (ejemplo: 0.85, 0.92, 0.75).
 
 Tipos de documento:
 - passport: Pasaporte
@@ -1350,30 +1397,54 @@ Problemas comunes a detectar:
 
         # Parse the response
         response_text = message.content[0].text.strip()
+        logger.info(f"Claude Vision raw response: {response_text[:500]}")
 
-        # Try to extract JSON from response (handle potential markdown code blocks)
-        if response_text.startswith("```"):
-            # Remove markdown code block
-            lines = response_text.split("\n")
-            response_text = "\n".join(lines[1:-1] if lines[-1] == "```" else lines[1:])
+        # Extract JSON from response
+        json_text = extract_json_from_response(response_text)
+        logger.info(f"Extracted JSON: {json_text[:300]}")
 
-        analysis = json.loads(response_text)
+        analysis = json.loads(json_text)
+
+        # Ensure confidence is a float
+        raw_confidence = analysis.get("confidence", 0)
+        logger.info(f"Raw confidence value: {raw_confidence} (type: {type(raw_confidence).__name__})")
+
+        if isinstance(raw_confidence, str):
+            # Handle string like "0.85" or "85%"
+            raw_confidence = raw_confidence.replace("%", "").strip()
+            try:
+                raw_confidence = float(raw_confidence)
+                if raw_confidence > 1:
+                    raw_confidence = raw_confidence / 100  # Convert 85 to 0.85
+            except ValueError:
+                raw_confidence = 0.0
+        elif isinstance(raw_confidence, (int, float)):
+            raw_confidence = float(raw_confidence)
+            if raw_confidence > 1:
+                raw_confidence = raw_confidence / 100  # Convert 85 to 0.85
+        else:
+            raw_confidence = 0.0
+
+        analysis["confidence"] = raw_confidence
         analysis["success"] = True
         analysis["raw_response"] = response_text
 
+        logger.info(f"Claude Vision analysis: type={analysis.get('type')}, confidence={analysis['confidence']}")
         return analysis
 
     except json.JSONDecodeError as e:
-        logger.error(f"Claude Vision JSON parse error: {e}, response: {response_text[:500]}")
+        logger.error(f"Claude Vision JSON parse error: {e}")
+        logger.error(f"Raw response was: {response_text[:1000]}")
         return {
             "success": False,
             "error": f"JSON parse error: {str(e)}",
             "type": "unknown",
             "confidence": 0.0,
-            "raw_response": response_text if 'response_text' in dir() else "",
+            "raw_response": response_text,
         }
     except Exception as e:
         logger.error(f"Claude Vision API error: {e}")
+        logger.error(f"Response text: {response_text[:500] if response_text else 'empty'}")
         return {
             "success": False,
             "error": str(e),
@@ -3243,17 +3314,20 @@ async def handle_photo_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) ->
         if issues:
             ai_summary += f"\n   ⚠️ {', '.join(issues[:2])}"
 
+    # Get user name with fallbacks
+    user_name = user.get('full_name') or user.get('first_name') or update.effective_user.first_name or f"Usuario {tid}"
+
     # Different admin notification based on approval status
     if approved == 1:
         await notify_admins(ctx,
             f"✅ Documento AUTO-APROBADO\n"
-            f"Usuario: {user.get('first_name')} (TID: {tid})\n"
+            f"Usuario: {user_name} (TID: {tid})\n"
             f"Tipo: {info['name']}{ai_summary}\n"
             f"Docs aprobados: {approved_count}")
     else:
         await notify_admins(ctx,
             f"📄 Documento PENDIENTE de revisión\n"
-            f"Usuario: {user.get('first_name')} (TID: {tid})\n"
+            f"Usuario: {user_name} (TID: {tid})\n"
             f"Tipo: {info['name']}{ai_summary}\n"
             f"DocID: {doc_id}\n"
             f"Use /pendientes para revisar")
@@ -3303,9 +3377,12 @@ async def handle_file_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
         ]),
     )
 
+    # Get user name with fallbacks
+    user_name = user.get('full_name') or user.get('first_name') or update.effective_user.first_name or f"Usuario {update.effective_user.id}"
+
     await notify_admins(ctx,
         f"📎 Archivo subido\n"
-        f"Usuario: {user.get('first_name')} (TID: {update.effective_user.id})\n"
+        f"Usuario: {user_name} (TID: {update.effective_user.id})\n"
         f"Tipo: {info['name']}\n"
         f"Archivo: {file_name}\n"
         f"Total docs: {dc}")
@@ -3816,38 +3893,250 @@ async def cmd_pendientes(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ No hay documentos pendientes de revisión.")
         return
 
-    msg = f"*📋 Documentos Pendientes* ({len(pending)})\n\n"
+    # Show count summary
+    await update.message.reply_text(f"📋 *{len(pending)} documentos pendientes de revisión*", parse_mode=ParseMode.MARKDOWN)
 
-    for doc in pending:
-        doc_id = doc.get('id')
-        tid = doc.get('telegram_id')
-        first_name = doc.get('first_name', 'Usuario')
-        doc_type = doc.get('doc_type', 'unknown')
-        ai_type = doc.get('ai_type', '')
-        confidence = doc.get('ai_confidence', 0) or 0
-        issues = doc.get('issues', '')
+    # Show first document
+    await show_pending_document(update, ctx, pending[0])
 
-        type_name = DOC_TYPES.get(doc_type, {}).get('name', doc_type)
 
-        # Confidence indicator
-        if confidence >= 0.6:
-            conf_icon = "🟡"
+async def show_pending_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE, doc: Dict):
+    """Show a pending document with action buttons."""
+    doc_id = doc.get('id')
+    tid = doc.get('telegram_id')
+    first_name = doc.get('first_name') or 'Usuario'
+    doc_type = doc.get('doc_type', 'unknown')
+    ai_type = doc.get('ai_type', '')
+    confidence = doc.get('ai_confidence', 0) or 0
+    issues = doc.get('issues', '')
+    extracted_name = doc.get('extracted_name', '')
+    extracted_date = doc.get('extracted_date', '')
+    file_id = doc.get('file_id')
+
+    type_name = DOC_TYPES.get(doc_type, {}).get('name', doc_type)
+
+    # Confidence indicator
+    if confidence >= 0.6:
+        conf_icon = "🟡 Media"
+    else:
+        conf_icon = "🔴 Baja"
+
+    # Build info message
+    msg = f"*📄 Documento #{doc_id}*\n\n"
+    msg += f"*Usuario:* {first_name} (TID: {tid})\n"
+    msg += f"*Tipo esperado:* {type_name}\n"
+    msg += f"*Tipo detectado:* {ai_type or 'N/A'}\n"
+    msg += f"*Confianza:* {conf_icon} ({int(confidence * 100)}%)\n"
+
+    if extracted_name:
+        msg += f"*Nombre extraído:* {extracted_name}\n"
+    if extracted_date:
+        msg += f"*Fecha:* {extracted_date}\n"
+    if issues:
+        msg += f"\n⚠️ *Problemas:* {issues}\n"
+
+    # Action buttons
+    buttons = [
+        [
+            InlineKeyboardButton("✓ Aprobar", callback_data=f"pdoc_approve_{doc_id}"),
+            InlineKeyboardButton("✗ Rechazar", callback_data=f"pdoc_reject_{doc_id}"),
+        ],
+        [
+            InlineKeyboardButton("🔄 Pedir nueva foto", callback_data=f"pdoc_resubmit_{doc_id}"),
+            InlineKeyboardButton("⏭ Siguiente", callback_data="pdoc_next"),
+        ],
+    ]
+
+    # Send the document image first
+    chat_id = update.effective_chat.id
+    if file_id:
+        try:
+            await ctx.bot.send_photo(
+                chat_id,
+                file_id,
+                caption=f"📄 {type_name} - Doc #{doc_id} - {first_name}"
+            )
+        except Exception:
+            try:
+                await ctx.bot.send_document(
+                    chat_id,
+                    file_id,
+                    caption=f"📄 {type_name} - Doc #{doc_id} - {first_name}"
+                )
+            except Exception as e:
+                msg += f"\n\n❌ No se pudo cargar el archivo: {e}"
+
+    # Send info message with buttons
+    if update.callback_query:
+        await ctx.bot.send_message(
+            chat_id,
+            msg,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+    else:
+        await update.message.reply_text(
+            msg,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+
+
+async def handle_pending_doc_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle pending document action callbacks: pdoc_approve_{id}, pdoc_reject_{id}, etc."""
+    q = update.callback_query
+    await q.answer()
+
+    caller_id = update.effective_user.id
+    if caller_id not in ADMIN_IDS:
+        return
+
+    data = q.data
+
+    if data == "pdoc_next":
+        # Show next pending document
+        pending = get_pending_documents(limit=1)
+        if pending:
+            await show_pending_document(update, ctx, pending[0])
         else:
-            conf_icon = "🔴"
+            await q.message.reply_text("✅ No hay más documentos pendientes.")
+        return
 
-        msg += f"{conf_icon} *{type_name}*\n"
-        msg += f"   DocID: {doc_id} | TID: {tid}\n"
-        msg += f"   IA: {ai_type} ({int(confidence * 100)}%)\n"
-        if issues:
-            msg += f"   ⚠️ {issues[:50]}\n"
-        msg += "\n"
+    # Parse action and doc_id
+    parts = data.split("_")
+    if len(parts) < 3:
+        return
 
-    msg += "\n*Acciones:*\n"
-    msg += "• `/aprobar <doc_id>` - Aprobar documento\n"
-    msg += "• `/rechazar <doc_id>` - Rechazar documento\n"
-    msg += "• `/ver <doc_id>` - Ver documento\n"
+    action = parts[1]  # approve, reject, resubmit
+    doc_id = int(parts[2])
 
-    await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+    doc = get_document_by_id(doc_id)
+    if not doc:
+        await q.message.reply_text(f"Documento {doc_id} no encontrado.")
+        return
+
+    tid = doc.get('telegram_id')
+    doc_type = doc.get('doc_type', 'unknown')
+    type_name = DOC_TYPES.get(doc_type, {}).get('name', doc_type)
+
+    if action == "approve":
+        success = update_document_approval(doc_id, 1)
+        if success:
+            await q.message.reply_text(f"✅ Documento #{doc_id} aprobado.")
+            # Notify user
+            try:
+                await ctx.bot.send_message(
+                    tid,
+                    f"✅ *Documento aprobado*\n\n"
+                    f"Su documento «{type_name}» ha sido revisado y aprobado por nuestro equipo.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify user {tid}: {e}")
+
+    elif action == "reject":
+        # Show rejection reason buttons
+        buttons = [
+            [InlineKeyboardButton("📷 Borroso/ilegible", callback_data=f"prej_blur_{doc_id}")],
+            [InlineKeyboardButton("✂️ Incompleto/recortado", callback_data=f"prej_incomplete_{doc_id}")],
+            [InlineKeyboardButton("📅 Documento vencido", callback_data=f"prej_expired_{doc_id}")],
+            [InlineKeyboardButton("❓ Tipo incorrecto", callback_data=f"prej_wrongtype_{doc_id}")],
+            [InlineKeyboardButton("🚫 Otro motivo", callback_data=f"prej_other_{doc_id}")],
+        ]
+        await q.message.reply_text(
+            f"*Seleccione el motivo del rechazo:*\nDocumento #{doc_id}",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        return  # Don't show next doc yet
+
+    elif action == "resubmit":
+        success = update_document_approval(doc_id, -2)  # -2 = needs resubmission
+        if success:
+            await q.message.reply_text(f"🔄 Solicitada nueva foto para documento #{doc_id}.")
+            # Notify user
+            try:
+                await ctx.bot.send_message(
+                    tid,
+                    f"🔄 *Nueva foto requerida*\n\n"
+                    f"Por favor, envíe una nueva foto de su documento «{type_name}».\n\n"
+                    f"*Consejos:*\n"
+                    f"• Asegúrese de que el documento esté bien iluminado\n"
+                    f"• Evite sombras y reflejos\n"
+                    f"• Incluya todo el documento en la foto\n"
+                    f"• Mantenga la cámara estable",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify user {tid}: {e}")
+
+    # Show next pending document
+    pending = get_pending_documents(limit=1)
+    if pending:
+        await show_pending_document(update, ctx, pending[0])
+    else:
+        await q.message.reply_text("✅ No hay más documentos pendientes.")
+
+
+async def handle_rejection_reason_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle rejection reason callbacks: prej_blur_{id}, prej_incomplete_{id}, etc."""
+    q = update.callback_query
+    await q.answer()
+
+    caller_id = update.effective_user.id
+    if caller_id not in ADMIN_IDS:
+        return
+
+    # Parse reason and doc_id
+    parts = q.data.split("_")
+    if len(parts) < 3:
+        return
+
+    reason_code = parts[1]
+    doc_id = int(parts[2])
+
+    # Map reason codes to messages
+    reasons = {
+        "blur": "El documento está borroso o ilegible. Por favor, envíe una foto más clara.",
+        "incomplete": "El documento está incompleto o recortado. Por favor, incluya todo el documento en la foto.",
+        "expired": "El documento parece estar vencido. Por favor, proporcione un documento vigente.",
+        "wrongtype": "El tipo de documento no corresponde al solicitado. Por favor, verifique y envíe el documento correcto.",
+        "other": "El documento no puede ser aceptado. Por favor, contacte con soporte para más información.",
+    }
+
+    reason = reasons.get(reason_code, reasons["other"])
+
+    doc = get_document_by_id(doc_id)
+    if not doc:
+        await q.message.reply_text(f"Documento {doc_id} no encontrado.")
+        return
+
+    tid = doc.get('telegram_id')
+    doc_type = doc.get('doc_type', 'unknown')
+    type_name = DOC_TYPES.get(doc_type, {}).get('name', doc_type)
+
+    success = update_document_approval(doc_id, -1)  # -1 = rejected
+    if success:
+        await q.message.reply_text(f"❌ Documento #{doc_id} rechazado: {reason_code}")
+        # Notify user
+        try:
+            await ctx.bot.send_message(
+                tid,
+                f"❌ *Documento rechazado*\n\n"
+                f"Su documento «{type_name}» no ha podido ser aceptado.\n\n"
+                f"*Motivo:* {reason}\n\n"
+                f"Por favor, suba una nueva versión del documento.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify user {tid}: {e}")
+
+    # Show next pending document
+    pending = get_pending_documents(limit=1)
+    if pending:
+        await show_pending_document(update, ctx, pending[0])
+    else:
+        await q.message.reply_text("✅ No hay más documentos pendientes.")
 
 
 async def cmd_aprobar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -4457,6 +4746,8 @@ def main():
     app.add_handler(CommandHandler("rechazar", cmd_rechazar), group=-1)
     app.add_handler(CommandHandler("ver", cmd_ver), group=-1)
     app.add_handler(CallbackQueryHandler(handle_admin_doc_callback, pattern="^adoc_"), group=-1)
+    app.add_handler(CallbackQueryHandler(handle_pending_doc_callback, pattern="^pdoc_"), group=-1)
+    app.add_handler(CallbackQueryHandler(handle_rejection_reason_callback, pattern="^prej_"), group=-1)
 
     # Schedule re-engagement reminders (runs every 6 hours)
     job_queue = app.job_queue
