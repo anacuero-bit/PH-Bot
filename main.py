@@ -2466,9 +2466,15 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             apply_referral_code_to_user(tid, result['code'], result['referrer_id'])
 
             await update.message.reply_text(
-                f"Código aplicado. Tienes €{REFERRAL_FRIEND_DISCOUNT} de descuento en tu primer pago.\n\n"
-                "Bienvenido/a al servicio de regularización de *Pombo & Horowitz Abogados*.\n\n"
-                "Para empezar, indíquenos su país de origen:",
+                f"🎉 ¡Código aplicado! Tienes *€{REFERRAL_FRIEND_DISCOUNT} de descuento* en tu primer pago.\n\n"
+                "🇪🇸 *¡Bienvenido/a a tuspapeles2026!*\n\n"
+                "Somos un equipo de abogados especializados en extranjería respaldados "
+                "por *Pombo & Horowitz Abogados*.\n\n"
+                "✅ Te guiamos paso a paso\n"
+                "✅ Revisamos cada documento\n"
+                "✅ Preparamos tu expediente completo\n\n"
+                "Empecemos verificando si cumples los requisitos básicos.\n\n"
+                "Para empezar, indícanos tu país de origen:",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=country_kb(),
             )
@@ -2476,12 +2482,25 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
     # Normal start - ask if they have a referral code
     await update.message.reply_text(
-        "Bienvenido/a al servicio de regularización de *Pombo & Horowitz Abogados*.\n\n"
+        "🇪🇸 *¡Bienvenido/a a tuspapeles2026!*\n\n"
+        "Sabemos que este momento es importante para ti y tu familia. "
+        "La regularización extraordinaria de 2026 es una oportunidad histórica, "
+        "y estamos aquí para ayudarte a aprovecharla.\n\n"
+        "Somos un equipo de abogados especializados en extranjería respaldados "
+        "por *Pombo & Horowitz Abogados*. Ya hemos ayudado a cientos de personas "
+        "como tú a preparar su documentación.\n\n"
+        "✅ Te guiamos paso a paso\n"
+        "✅ Revisamos cada documento\n"
+        "✅ Preparamos tu expediente completo\n"
+        "✅ Presentamos tu solicitud cuando abra el plazo\n\n"
+        "El proceso es 100% por este chat. Sin citas, sin colas, sin complicaciones.\n\n"
+        "📅 El plazo de solicitudes abre en abril y cierra el *30 de junio de 2026*.\n\n"
+        "Empecemos verificando si cumples los requisitos básicos...\n\n"
         "¿Tienes un código de un amigo? Si lo tienes, escríbelo ahora para €25 de descuento.\n\n"
         "Ejemplo: `MARIA-7K2P`",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("No tengo código", callback_data="ref_skip")]
+            [InlineKeyboardButton("No tengo código — continuar", callback_data="ref_skip")]
         ]),
     )
     return ST_ENTER_REFERRAL_CODE
@@ -2597,8 +2616,7 @@ async def handle_referral_callbacks(update: Update, ctx: ContextTypes.DEFAULT_TY
 
     if q.data == "ref_skip":
         await q.edit_message_text(
-            "Bienvenido/a al servicio de regularización de *Pombo & Horowitz Abogados*.\n\n"
-            "Para empezar, indíquenos su país de origen:",
+            "Para empezar, indícanos tu país de origen:",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=country_kb(),
         )
@@ -3401,156 +3419,61 @@ async def handle_photo_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) ->
     info = DOC_TYPES.get(dtype, DOC_TYPES["other"])
     tid = update.effective_user.id
 
-    # Processing message
-    processing_msg = await update.message.reply_text("🔍 Analizando documento con IA…")
-
-    # Download image
-    try:
-        file = await ctx.bot.get_file(photo.file_id)
-        photo_bytes = await file.download_as_bytearray()
-    except Exception as e:
-        logger.error(f"Failed to download photo: {e}")
-        await processing_msg.edit_text("❌ Error al descargar la imagen. Por favor, inténtelo de nuevo.")
-        return ST_UPLOAD_PHOTO
-
-    # Analyze with Claude Vision API
-    ai_result = await analyze_document_with_claude(bytes(photo_bytes))
-
-    # Also run OCR fallback for backup
-    ocr_result = {"ocr_text": "", "detected_type": dtype, "score": 50, "notes": []}
-    if OCR_AVAILABLE:
-        try:
-            image = Image.open(BytesIO(photo_bytes))
-            text = pytesseract.image_to_string(image, lang="spa+eng")
-            ocr_result["ocr_text"] = text[:2000]
-            ocr_result["detected_type"] = classify_document_ocr(text)
-        except Exception as e:
-            logger.error(f"OCR fallback failed: {e}")
-
-    # Determine confidence level and approval status
-    confidence = ai_result.get("confidence", 0.0)
-    ai_type = ai_result.get("type", "unknown")
-    issues = ai_result.get("issues", [])
-
-    # Auto-processing logic based on confidence
-    # High confidence (≥0.85): Auto-approve
-    # Medium confidence (0.6-0.85): Pending review
-    # Low confidence (<0.6): Ask user to re-upload
-
-    if confidence >= 0.85 and not issues:
-        approved = 1  # Auto-approved
-        status_text = "✅ Documento verificado y aprobado automáticamente."
-        score = 90
-    elif confidence >= 0.6:
-        approved = 0  # Pending review
-        status_text = "⏳ Documento recibido. Será revisado por nuestro equipo."
-        score = 60
-    else:
-        approved = 0  # Pending, but likely needs re-upload
-        status_text = "⚠️ No pudimos verificar este documento correctamente."
-        score = 30
-
-    # Detected document type from AI
-    detected_type = get_doc_type_from_ai(ai_type) if ai_type != "unknown" else ocr_result["detected_type"]
-
-    # Save document with AI analysis
+    # Save document immediately — always accept, admin reviews later
     doc_id = save_document(
         tid=tid,
         doc_type=dtype,
         file_id=file_id,
-        ocr_text=ocr_result.get("ocr_text", ""),
-        detected_type=detected_type,
-        score=score,
-        notes="; ".join(issues) if issues else "",
-        ai_analysis=ai_result.get("raw_response", ""),
-        ai_confidence=confidence,
-        ai_type=ai_type,
-        extracted_name=ai_result.get("extracted_name") or "",
-        extracted_address=ai_result.get("extracted_address") or "",
-        extracted_date=ai_result.get("extracted_date") or "",
-        approved=approved,
-        document_country=ai_result.get("document_country") or "",
-        expiry_date=ai_result.get("expiry_date") or "",
-        issues="; ".join(issues) if issues else "",
+        ocr_text="",
+        detected_type=dtype,
+        score=50,
+        notes="pending_review",
+        approved=0,
     )
 
     dc = get_doc_count(tid)
-    approved_count = get_approved_doc_count(tid)
     user = get_user(tid)
 
-    # Build notes text
-    notes_text = ""
-    if issues:
-        notes_text = "\n\n*Observaciones:*\n" + "\n".join(f"  · {n}" for n in issues)
-
-    # Type mismatch warning
-    if detected_type != dtype and detected_type != "other":
-        detected_name = DOC_TYPES.get(detected_type, {}).get("name", detected_type)
-        expected_name = info["name"]
-        notes_text += f"\n\n⚠️ Esperábamos «{expected_name}» pero parece ser «{detected_name}»."
-
-    # Phase 2 unlock message
+    # Phase 2 unlock check
     unlock = ""
-    if approved_count >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
-        unlock = "\n\n🎉 Ya puede desbloquear la *revisión legal completa* por €39."
+    if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
+        unlock = "\n\n🎉 Ya puedes desbloquear la *revisión legal completa* por €39."
 
-    # Different response based on confidence
-    if confidence < 0.6:
-        # Low confidence - suggest re-upload
-        await processing_msg.edit_text(
-            f"{status_text}\n\n"
-            f"Confianza del análisis: {int(confidence * 100)}%\n"
-            f"Tipo detectado: {DOC_TYPES.get(detected_type, {}).get('name', 'Desconocido')}"
-            f"{notes_text}\n\n"
-            "💡 *Sugerencia:* Por favor, envíe una foto más clara del documento, "
-            "asegurándose de que esté bien iluminado y se vea completo.",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("🔄 Enviar otra foto", callback_data=f"dt_{dtype}")],
-                [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
-                [InlineKeyboardButton("Volver al menú", callback_data="back")],
-            ]),
-        )
-    else:
-        await processing_msg.edit_text(
-            f"{status_text}\n\n"
-            f"Tipo: {info['name']}\n"
-            f"Documentos aprobados: {approved_count}\n"
-            f"Documentos totales: {dc}"
-            f"{notes_text}{unlock}",
-            parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
-                [InlineKeyboardButton("Volver al menú", callback_data="back")],
-            ]),
-        )
+    # Always show success to user
+    await update.message.reply_text(
+        f"✅ *¡Documento recibido!*\n\n"
+        f"Tu *{info['name']}* ha sido guardado y será revisado por nuestro equipo "
+        f"legal en las próximas horas.\n\n"
+        f"Te notificaremos cuando esté verificado. Mientras tanto, puedes seguir "
+        f"subiendo más documentos.\n\n"
+        f"📄 Documentos subidos: {dc}{unlock}",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
+            [InlineKeyboardButton("Volver al menú", callback_data="back")],
+        ]),
+    )
 
-    # Notify admins with AI analysis summary
-    ai_summary = ""
-    if ai_result.get("success"):
-        ai_summary = f"\n🤖 IA: {ai_type} ({int(confidence * 100)}%)"
-        if ai_result.get("extracted_name"):
-            ai_summary += f"\n   Nombre: {ai_result['extracted_name']}"
-        if issues:
-            ai_summary += f"\n   ⚠️ {', '.join(issues[:2])}"
-
-    # Get user name with fallbacks
+    # Notify admins with photo for review
     user_name = user.get('full_name') or user.get('first_name') or update.effective_user.first_name or f"Usuario {tid}"
 
-    # Different admin notification based on approval status
-    if approved == 1:
-        await notify_admins(ctx,
-            f"✅ Documento AUTO-APROBADO\n"
-            f"Usuario: {user_name} (TID: {tid})\n"
-            f"Tipo: {info['name']}{ai_summary}\n"
-            f"Docs aprobados: {approved_count}")
-    else:
-        await notify_admins(ctx,
-            f"📄 Documento PENDIENTE de revisión\n"
-            f"Usuario: {user_name} (TID: {tid})\n"
-            f"Tipo: {info['name']}{ai_summary}\n"
-            f"DocID: {doc_id}\n"
-            f"Use /pendientes para revisar")
+    for aid in ADMIN_IDS:
+        try:
+            await ctx.bot.send_photo(
+                aid,
+                file_id,
+                caption=(
+                    f"📄 *Nuevo documento para revisar*\n"
+                    f"Usuario: {user_name} (TID: {tid})\n"
+                    f"Tipo: {info['name']}\n"
+                    f"DocID: {doc_id}\n"
+                    f"Total docs: {dc}\n\n"
+                    f"Use /pendientes para revisar"
+                ),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send admin photo notification to {aid}: {e}")
 
     return ST_MAIN_MENU
 
@@ -3566,30 +3489,35 @@ async def handle_file_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
 
     file_id = doc.file_id
     file_name = doc.file_name or "documento"
+    tid = update.effective_user.id
     dtype = ctx.user_data.get("doc_type", "other")
     info = DOC_TYPES.get(dtype, DOC_TYPES["other"])
 
-    # Save document
-    save_document(
-        update.effective_user.id, dtype, file_id,
+    # Save document immediately — always accept, admin reviews later
+    doc_id = save_document(
+        tid, dtype, file_id,
         ocr_text=f"[PDF/File: {file_name}]",
         detected_type=dtype,
         score=50,
-        notes="Documento recibido como archivo. Será revisado por nuestro equipo.",
+        notes="pending_review",
+        approved=0,
     )
 
-    dc = get_doc_count(update.effective_user.id)
-    user = get_user(update.effective_user.id)
+    dc = get_doc_count(tid)
+    user = get_user(tid)
 
     unlock = ""
     if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
-        unlock = "\n\nYa puede desbloquear la *revisión legal completa* por €39."
+        unlock = "\n\n🎉 Ya puedes desbloquear la *revisión legal completa* por €39."
 
+    # Always show success to user
     await update.message.reply_text(
-        f"✅ Documento recibido: {info['name']}\n"
-        f"Archivo: {file_name}\n"
-        f"Documentos totales: {dc}\n\n"
-        f"Será revisado por nuestro equipo legal.{unlock}",
+        f"✅ *¡Documento recibido!*\n\n"
+        f"Tu *{info['name']}* ha sido guardado y será revisado por nuestro equipo "
+        f"legal en las próximas horas.\n\n"
+        f"Te notificaremos cuando esté verificado. Mientras tanto, puedes seguir "
+        f"subiendo más documentos.\n\n"
+        f"📄 Documentos subidos: {dc}{unlock}",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
@@ -3597,15 +3525,27 @@ async def handle_file_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
         ]),
     )
 
-    # Get user name with fallbacks
-    user_name = user.get('full_name') or user.get('first_name') or update.effective_user.first_name or f"Usuario {update.effective_user.id}"
+    # Notify admins
+    user_name = user.get('full_name') or user.get('first_name') or update.effective_user.first_name or f"Usuario {tid}"
 
-    await notify_admins(ctx,
-        f"📎 Archivo subido\n"
-        f"Usuario: {user_name} (TID: {update.effective_user.id})\n"
-        f"Tipo: {info['name']}\n"
-        f"Archivo: {file_name}\n"
-        f"Total docs: {dc}")
+    for aid in ADMIN_IDS:
+        try:
+            await ctx.bot.send_document(
+                aid,
+                file_id,
+                caption=(
+                    f"📎 *Nuevo documento para revisar*\n"
+                    f"Usuario: {user_name} (TID: {tid})\n"
+                    f"Tipo: {info['name']}\n"
+                    f"Archivo: {file_name}\n"
+                    f"DocID: {doc_id}\n"
+                    f"Total docs: {dc}\n\n"
+                    f"Use /pendientes para revisar"
+                ),
+                parse_mode=ParseMode.MARKDOWN,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send admin file notification to {aid}: {e}")
 
     return ST_MAIN_MENU
 
@@ -4222,7 +4162,6 @@ async def handle_pending_doc_callback(update: Update, ctx: ContextTypes.DEFAULT_
     data = q.data
 
     if data == "pdoc_next":
-        # Show next pending document
         pending = get_pending_documents(limit=1)
         if pending:
             await show_pending_document(update, ctx, pending[0])
@@ -4251,63 +4190,63 @@ async def handle_pending_doc_callback(update: Update, ctx: ContextTypes.DEFAULT_
         success = update_document_approval(doc_id, 1)
         if success:
             await q.message.reply_text(f"✅ Documento #{doc_id} aprobado.")
-            # Notify user
             try:
                 await ctx.bot.send_message(
                     tid,
                     f"✅ *Documento aprobado*\n\n"
-                    f"Su documento «{type_name}» ha sido revisado y aprobado por nuestro equipo.",
+                    f"Tu documento «{type_name}» ha sido revisado y aprobado por nuestro equipo.",
                     parse_mode=ParseMode.MARKDOWN
                 )
             except Exception as e:
                 logger.error(f"Failed to notify user {tid}: {e}")
 
+        # Auto-advance to next
+        pending = get_pending_documents(limit=1)
+        if pending:
+            await show_pending_document(update, ctx, pending[0])
+        else:
+            await q.message.reply_text("✅ No hay más documentos pendientes.")
+        return
+
     elif action == "reject":
         # Show rejection reason buttons
         buttons = [
             [InlineKeyboardButton("📷 Borroso/ilegible", callback_data=f"prej_blur_{doc_id}")],
-            [InlineKeyboardButton("✂️ Incompleto/recortado", callback_data=f"prej_incomplete_{doc_id}")],
-            [InlineKeyboardButton("📅 Documento vencido", callback_data=f"prej_expired_{doc_id}")],
-            [InlineKeyboardButton("❓ Tipo incorrecto", callback_data=f"prej_wrongtype_{doc_id}")],
-            [InlineKeyboardButton("🚫 Otro motivo", callback_data=f"prej_other_{doc_id}")],
+            [InlineKeyboardButton("✂️ Incompleto/recortado", callback_data=f"prej_inc_{doc_id}")],
+            [InlineKeyboardButton("📅 Documento vencido", callback_data=f"prej_exp_{doc_id}")],
+            [InlineKeyboardButton("❓ Tipo incorrecto", callback_data=f"prej_wrong_{doc_id}")],
+            [InlineKeyboardButton("🚫 No es documento válido", callback_data=f"prej_invalid_{doc_id}")],
+            [InlineKeyboardButton("✏️ Otro motivo", callback_data=f"prej_other_{doc_id}")],
         ]
         await q.message.reply_text(
             f"*Seleccione el motivo del rechazo:*\nDocumento #{doc_id}",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(buttons)
         )
-        return  # Don't show next doc yet
+        return
 
     elif action == "resubmit":
-        success = update_document_approval(doc_id, -2)  # -2 = needs resubmission
-        if success:
-            await q.message.reply_text(f"🔄 Solicitada nueva foto para documento #{doc_id}.")
-            # Notify user
-            try:
-                await ctx.bot.send_message(
-                    tid,
-                    f"🔄 *Nueva foto requerida*\n\n"
-                    f"Por favor, envíe una nueva foto de su documento «{type_name}».\n\n"
-                    f"*Consejos:*\n"
-                    f"• Asegúrese de que el documento esté bien iluminado\n"
-                    f"• Evite sombras y reflejos\n"
-                    f"• Incluya todo el documento en la foto\n"
-                    f"• Mantenga la cámara estable",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            except Exception as e:
-                logger.error(f"Failed to notify user {tid}: {e}")
-
-    # Show next pending document
-    pending = get_pending_documents(limit=1)
-    if pending:
-        await show_pending_document(update, ctx, pending[0])
-    else:
-        await q.message.reply_text("✅ No hay más documentos pendientes.")
+        # Show specific re-upload reason buttons
+        ctx.user_data["resubmit_doc_id"] = doc_id
+        buttons = [
+            [InlineKeyboardButton("💡 Flash/reflejo", callback_data=f"pres_flash_{doc_id}")],
+            [InlineKeyboardButton("🌑 Poca luz", callback_data=f"pres_dark_{doc_id}")],
+            [InlineKeyboardButton("🔍 Borroso", callback_data=f"pres_blur_{doc_id}")],
+            [InlineKeyboardButton("✂️ Cortado", callback_data=f"pres_cut_{doc_id}")],
+            [InlineKeyboardButton("📐 Ángulo incorrecto", callback_data=f"pres_angle_{doc_id}")],
+            [InlineKeyboardButton("📄 Sube frente/reverso", callback_data=f"pres_flip_{doc_id}")],
+            [InlineKeyboardButton("✏️ Escribir mensaje personalizado", callback_data=f"pres_custom_{doc_id}")],
+        ]
+        await q.message.reply_text(
+            f"*¿Por qué necesita nueva foto?*\nDocumento #{doc_id}",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(buttons)
+        )
+        return
 
 
 async def handle_rejection_reason_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    """Handle rejection reason callbacks: prej_blur_{id}, prej_incomplete_{id}, etc."""
+    """Handle rejection reason callbacks: prej_*_{id}"""
     q = update.callback_query
     await q.answer()
 
@@ -4323,13 +4262,13 @@ async def handle_rejection_reason_callback(update: Update, ctx: ContextTypes.DEF
     reason_code = parts[1]
     doc_id = int(parts[2])
 
-    # Map reason codes to messages
     reasons = {
-        "blur": "El documento está borroso o ilegible. Por favor, envíe una foto más clara.",
-        "incomplete": "El documento está incompleto o recortado. Por favor, incluya todo el documento en la foto.",
-        "expired": "El documento parece estar vencido. Por favor, proporcione un documento vigente.",
-        "wrongtype": "El tipo de documento no corresponde al solicitado. Por favor, verifique y envíe el documento correcto.",
-        "other": "El documento no puede ser aceptado. Por favor, contacte con soporte para más información.",
+        "blur": "El documento está borroso o ilegible. Por favor, envía una foto más clara.",
+        "inc": "El documento está incompleto o recortado. Por favor, incluye todo el documento en la foto.",
+        "exp": "El documento parece estar vencido. Por favor, proporciona un documento vigente.",
+        "wrong": "El tipo de documento no corresponde al solicitado. Verifica y envía el documento correcto.",
+        "invalid": "El archivo enviado no es un documento válido. Sube una foto o PDF de un documento oficial.",
+        "other": "El documento no puede ser aceptado. Contacta con soporte para más información.",
     }
 
     reason = reasons.get(reason_code, reasons["other"])
@@ -4346,25 +4285,128 @@ async def handle_rejection_reason_callback(update: Update, ctx: ContextTypes.DEF
     success = update_document_approval(doc_id, -1)  # -1 = rejected
     if success:
         await q.message.reply_text(f"❌ Documento #{doc_id} rechazado: {reason_code}")
-        # Notify user
         try:
             await ctx.bot.send_message(
                 tid,
                 f"❌ *Documento rechazado*\n\n"
-                f"Su documento «{type_name}» no ha podido ser aceptado.\n\n"
+                f"Tu documento «{type_name}» no ha podido ser aceptado.\n\n"
                 f"*Motivo:* {reason}\n\n"
-                f"Por favor, suba una nueva versión del documento.",
+                f"Por favor, sube una nueva versión del documento.",
                 parse_mode=ParseMode.MARKDOWN
             )
         except Exception as e:
             logger.error(f"Failed to notify user {tid}: {e}")
 
-    # Show next pending document
+    # Auto-advance to next
     pending = get_pending_documents(limit=1)
     if pending:
         await show_pending_document(update, ctx, pending[0])
     else:
         await q.message.reply_text("✅ No hay más documentos pendientes.")
+
+
+async def handle_resubmit_reason_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle resubmit reason callbacks: pres_*_{id}"""
+    q = update.callback_query
+    await q.answer()
+
+    caller_id = update.effective_user.id
+    if caller_id not in ADMIN_IDS:
+        return
+
+    parts = q.data.split("_")
+    if len(parts) < 3:
+        return
+
+    reason_code = parts[1]
+    doc_id = int(parts[2])
+
+    doc = get_document_by_id(doc_id)
+    if not doc:
+        await q.message.reply_text(f"Documento {doc_id} no encontrado.")
+        return
+
+    tid = doc.get('telegram_id')
+    doc_type = doc.get('doc_type', 'unknown')
+    type_name = DOC_TYPES.get(doc_type, {}).get('name', doc_type)
+
+    # Custom message flow
+    if reason_code == "custom":
+        ctx.user_data["custom_resubmit_doc_id"] = doc_id
+        ctx.user_data["custom_resubmit_tid"] = tid
+        ctx.user_data["custom_resubmit_type"] = type_name
+        await q.message.reply_text(
+            f"Escribe el mensaje que quieres enviar al usuario sobre su *{type_name}* (Doc #{doc_id}):",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return  # Wait for admin text input
+
+    # Template messages
+    templates = {
+        "flash": "📸 Tu documento tiene reflejo o brillo, probablemente por el flash. Por favor, toma otra foto con luz natural, sin flash.",
+        "dark": "🌑 La imagen está muy oscura. Busca un lugar con mejor iluminación y vuelve a intentarlo.",
+        "blur": "🔍 La imagen está borrosa. Asegúrate de que la cámara enfoque bien antes de tomar la foto.",
+        "cut": "✂️ El documento aparece cortado. Asegúrate de que se vea completo, incluyendo todos los bordes.",
+        "angle": "📐 El documento está en ángulo. Colócalo sobre una superficie plana y toma la foto desde arriba.",
+        "flip": "📄 Necesitamos ver el otro lado del documento. Por favor, sube una foto del frente/reverso.",
+    }
+
+    message = templates.get(reason_code, "Por favor, envía una nueva foto de este documento.")
+
+    success = update_document_approval(doc_id, -2)  # -2 = needs resubmission
+    if success:
+        await q.message.reply_text(f"🔄 Pedida nueva foto para documento #{doc_id}: {reason_code}")
+        try:
+            await ctx.bot.send_message(
+                tid,
+                f"🔄 *Nueva foto necesaria*\n\n"
+                f"Sobre tu «{type_name}»:\n\n"
+                f"{message}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            logger.error(f"Failed to notify user {tid}: {e}")
+
+    # Auto-advance to next
+    pending = get_pending_documents(limit=1)
+    if pending:
+        await show_pending_document(update, ctx, pending[0])
+    else:
+        await q.message.reply_text("✅ No hay más documentos pendientes.")
+
+
+async def handle_admin_custom_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle admin custom message for document resubmission requests."""
+    caller_id = update.effective_user.id
+    if caller_id not in ADMIN_IDS:
+        return  # Not admin, let other handlers process this
+    doc_id = ctx.user_data.get("custom_resubmit_doc_id")
+    if not doc_id:
+        return  # No pending custom message, let other handlers process
+    tid = ctx.user_data.pop("custom_resubmit_tid", None)
+    type_name = ctx.user_data.pop("custom_resubmit_type", "documento")
+    ctx.user_data.pop("custom_resubmit_doc_id", None)
+
+    custom_msg = update.message.text.strip()
+
+    success = update_document_approval(doc_id, -2)  # -2 = needs resubmission
+    if success:
+        await update.message.reply_text(f"🔄 Mensaje personalizado enviado para documento #{doc_id}.")
+        try:
+            await ctx.bot.send_message(
+                tid,
+                f"📝 *Sobre tu {type_name}:*\n\n{custom_msg}",
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            logger.error(f"Failed to send custom message to user {tid}: {e}")
+
+    # Auto-advance to next
+    pending = get_pending_documents(limit=1)
+    if pending:
+        await show_pending_document(update, ctx, pending[0])
+    else:
+        await update.message.reply_text("✅ No hay más documentos pendientes.")
 
 
 async def cmd_aprobar(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -4974,6 +5016,8 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_admin_doc_callback, pattern="^adoc_"), group=-1)
     app.add_handler(CallbackQueryHandler(handle_pending_doc_callback, pattern="^pdoc_"), group=-1)
     app.add_handler(CallbackQueryHandler(handle_rejection_reason_callback, pattern="^prej_"), group=-1)
+    app.add_handler(CallbackQueryHandler(handle_resubmit_reason_callback, pattern="^pres_"), group=-1)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_custom_message), group=-2)
 
     # Schedule re-engagement reminders (runs every 6 hours)
     job_queue = app.job_queue
