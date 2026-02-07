@@ -266,7 +266,8 @@ PRICING = {
     ST_CONTACT,
     ST_HUMAN_MSG,
     ST_ENTER_REFERRAL_CODE,
-) = range(21)
+    ST_FAQ_CATEGORY,
+) = range(22)
 
 # =============================================================================
 # REFERRAL SYSTEM
@@ -495,12 +496,11 @@ INTENT_PATTERNS = {
         r"\bestoy perdid[oa]\b", r"\bexplica\b",
     ],
     "price": [
-        r"\bprecio\b", r"\bcuest[ao]\b", r"\bcuánto\b", r"\btarifa\b",
-        r"\bpagar\b", r"\bcost[oe]\b", r"\bcobr", r"\bdinero\b",
+        r"\bprecio\b", r"\bcuest[ao]\b", r"\bcuánto cuesta\b", r"\btarifa\b",
+        r"\bcost[oe]\b", r"\bcobr", r"\bdinero\b",
     ],
     "documents": [
-        r"\bdocumento", r"\bpapeles\b", r"\bpasaporte\b", r"\bempadronamiento\b",
-        r"\bantecedentes\b", r"\bfactura\b", r"\bqué necesito\b",
+        r"\bdocumento", r"\bpapeles\b", r"\bqué necesito\b",
     ],
     "status": [
         r"\bestado\b", r"\bmi caso\b", r"\bcómo va\b", r"\bprogreso\b",
@@ -511,515 +511,608 @@ INTENT_PATTERNS = {
         r"\bteléfono\b", r"\bcontacto\b", r"\babogad[oa]\b", r"\bhablar con\b",
     ],
     "work": [
-        r"\btrabajar\b", r"\btrabajo\b", r"\bcontrato\b", r"\bautónom[oa]\b",
-        r"\bempleo\b", r"\bempresa\b", r"\bempleador\b", r"\bpatrón\b",
-        r"\boferta de trabajo\b", r"\bvulnerab",
+        r"\bcontrato\b", r"\bempleo\b", r"\boferta de trabajo\b",
+        r"\bempleador\b", r"\bpatrón\b", r"\bvulnerab",
     ],
     "family": [
         r"\bhij[oa]s?\b", r"\bmenor", r"\bfamilia\b", r"\bbebé\b",
         r"\bniñ[oa]s?\b", r"\besposa?\b", r"\bmarido\b", r"\bpareja\b",
+        r"\breagrupación\b",
     ],
     "deadline": [
-        r"\bplazo\b", r"\bfecha\b", r"\bcuándo\b", r"\btiempo\b",
-        r"\bdeadline\b", r"\babril\b", r"\bjunio\b",
+        r"\bplazo\b", r"\bfecha\b", r"\bcuándo\b", r"\bdeadline\b",
+        r"\babril\b", r"\bjunio\b",
     ],
     "asylum": [
         r"\basilo\b", r"\brefugi", r"\bprotección internacional\b",
-        r"\btarjeta roja\b", r"\bhoja blanca\b",
+        r"\btarjeta roja\b",
     ],
     "trust": [
-        r"\bestafa\b", r"\bconfia[rn]?\b", r"\bsegur[oa]\b", r"\bfraude\b",
-        r"\blegítim[oa]\b", r"\breal\b", r"\bverdad\b", r"\bfiar\b",
+        r"\bestafa\b", r"\breal\b", r"\bverdad\b", r"\bmentira\b",
+        r"\blegítim[oa]\b",
     ],
     "online_submission": [
-        r"\bpresencial\b", r"\boficina\b", r"\btelemátic", r"\bonline\b",
-        r"\bcita previa\b", r"\bcola\b", r"\bhay que ir\b",
-    ],
-    "approval_rate": [
-        r"\bprobabilidad\b", r"\bme van a aprobar\b", r"\brechaz",
-        r"\bposibilidades\b", r"\bfunciona esto\b", r"\bqué posibilidad",
-    ],
-    "comparison_2005": [
-        r"\b2005\b", r"\banterior\b", r"\bla última vez\b",
-        r"\bproceso anterior\b",
+        r"\bpresencial\b", r"\btelemátic", r"\bonline\b",
+        r"\bcómo presento\b", r"\bdónde presento\b",
     ],
     "no_empadronamiento": [
         r"\bno tengo empadronamiento\b", r"\bsin empadronamiento\b",
-        r"\bno.*empadronad[oa]\b", r"\bno me quieren empadronar\b",
+        r"\bno.*empadronad[oa]\b", r"\bpadrón\b",
     ],
     "travel": [
-        r"\bviajar\b", r"\bsalir de espa\xf1a\b", r"\bvuelo\b",
-        r"\bir a mi pa\xeds\b", r"\bvolver a mi pa\xeds\b",
+        r"\bviajar\b", r"\bsalir de espa\xf1a\b", r"\bsalir.*mientras\b",
+        r"\bviajar.*mientras\b",
     ],
     "expired_passport": [
-        r"\bpasaporte vencido\b", r"\bpasaporte caducado\b",
+        r"\bpasaporte.*vencido\b", r"\bpasaporte.*caducado\b",
         r"\brenovar pasaporte\b", r"\bsin pasaporte\b",
-    ],
-    "arraigo": [
-        r"\barraigo\b", r"\bya tengo expediente\b",
-        r"\botra solicitud\b",
     ],
     "denial": [
         r"\bdeneg", r"\brecurso\b", r"\bsi me dicen que no\b",
         r"\bqu\xe9 pasa si no\b",
     ],
-
+    "nationality": [
+        r"\bnacionalidad\b", r"\bcolombian[oa]\b", r"\bvenezolan[oa]\b",
+        r"\bperuan[oa]\b", r"\bpa\xeds\b",
+    ],
+    "tourist_entry": [
+        r"\bturista\b", r"\bvisa\b", r"\bme qued[eé]\b", r"\bquedado\b",
+    ],
+    "prior_denial": [
+        r"\bdenegaron\b", r"\bdenegado\b", r"\brechazaron\b", r"\bnegaron\b",
+        r"\barraigo\b",
+    ],
+    "expulsion": [
+        r"\bexpulsi\xf3n\b", r"\bexpulsar\b", r"\bdeportar\b",
+    ],
+    "criminal_cert": [
+        r"\bcertificado.*antecedentes\b", r"\bapostilla\b",
+        r"\bantecedentes\b",
+    ],
+    "response_time": [
+        r"\bcu\xe1nto tarda\b", r"\brespuesta\b", r"\bresoluci\xf3n\b",
+    ],
+    "work_while_waiting": [
+        r"\btrabajar.*mientras\b", r"\bprovisional\b",
+        r"\btrabajar\b", r"\btrabajo\b", r"\bautónom[oa]\b",
+    ],
+    "payment_phases": [
+        r"\bfases?\b", r"\bfase 1\b", r"\bfase 2\b", r"\bfase 3\b",
+        r"\bfase 4\b", r"\bpagar\b",
+    ],
+    "permit_type": [
+        r"\bqu\xe9 permiso\b", r"\bresidencia\b", r"\btarjeta\b", r"\bTIE\b",
+    ],
+    "spanish_nationality": [
+        r"\bnacionalidad espa\xf1ola\b", r"\bciudadan\xeda\b",
+    ],
+    "safety": [
+        r"\bsegur[oa]\b", r"\bmiedo\b", r"\briesgo\b",
+    ],
+    "scam_accelerate": [
+        r"\bacelerar\b", r"\brápido\b", r"\bpagar.*más\b", r"\burgente\b",
+    ],
+    "why_now": [
+        r"\bpor qu\xe9 ahora\b", r"\bpor qu\xe9 no antes\b",
+    ],
+    "tiempo_espana": [
+        r"\bcuánto tiempo\b", r"\baños\b", r"\bmeses\b", r"\bllevo\b",
+    ],
 }
 
 # =============================================================================
-# FAQ DATABASE — Professional tone, comprehensive
+# FAQ CATEGORIES — Accordion/collapsible navigation
+# =============================================================================
+
+FAQ_CATEGORIES = {
+    "cat_req": {
+        "title": "📋 Requisitos Básicos",
+        "keys": [
+            "requisitos", "contrato_trabajo", "nacionalidad", "tiempo_espana",
+            "turista", "denegacion_previa", "orden_expulsion", "solicitantes_asilo",
+        ],
+    },
+    "cat_ant": {
+        "title": "🔍 Antecedentes Penales",
+        "keys": [
+            "antecedentes", "certificado_antecedentes",
+            "antecedentes_dificil", "validez_antecedentes",
+        ],
+    },
+    "cat_doc": {
+        "title": "📄 Documentos Necesarios",
+        "keys": [
+            "documentos_necesarios", "prueba_llegada", "prueba_permanencia",
+            "sin_empadronamiento", "documentos_otro_nombre", "traduccion",
+            "pasaporte_vencido", "pasaporte_perdido",
+        ],
+    },
+    "cat_pro": {
+        "title": "⏰ Proceso y Plazos",
+        "keys": [
+            "plazos", "como_presentar", "presentar_antes", "plazo_vencido",
+            "tiempo_respuesta", "trabajar_mientras_espero",
+            "salir_espana", "denegacion",
+        ],
+    },
+    "cat_cos": {
+        "title": "💰 Costos y Pagos",
+        "keys": [
+            "costo", "por_que_pagar", "solo_sin_abogado", "fases_pago",
+        ],
+    },
+    "cat_dep": {
+        "title": "✅ Después de la Solicitud",
+        "keys": [
+            "que_permiso", "trabajar_legal", "viajar",
+            "traer_familia", "nacionalidad_espanola",
+        ],
+    },
+    "cat_mie": {
+        "title": "🛡 Miedos Comunes",
+        "keys": [
+            "seguridad_datos", "es_real", "por_que_ahora", "estafa_acelerar",
+        ],
+    },
+}
+
+# =============================================================================
+# FAQ DATABASE — 41 entries, professional tone
 # =============================================================================
 
 FAQ = {
+    # === REQUISITOS BÁSICOS ===
     "requisitos": {
-        "title": "Requisitos de la regularización",
-        "keywords": ["requisito", "puedo", "quién", "elegible", "condicion"],
+        "title": "¿Cuáles son los requisitos?",
+        "keywords": ["requisito", "necesito", "califico", "puedo aplicar", "elegible", "condicion"],
         "text": (
-            "*Requisitos principales:*\n\n"
-            "1. Haber entrado a España *antes del 31 de diciembre de 2025*.\n"
-            "2. Acreditar una estancia continuada de *al menos 5 meses*.\n"
-            "3. *No tener antecedentes penales* en España ni en su país de origen.\n\n"
-            "La estancia se puede probar con documentos públicos o privados: "
-            "empadronamiento, facturas, extractos bancarios, contratos, "
-            "tarjeta sanitaria, recibos de envíos de dinero, entre otros.\n\n"
-            "Los solicitantes de protección internacional (asilo) también pueden "
-            "acogerse, siempre que la solicitud se hubiera presentado antes del 31/12/2025."
+            "*¿Cuáles son los requisitos para la regularización 2026?*\n\n"
+            "Debes demostrar:\n"
+            "1. Estar en España *antes del 31 de diciembre de 2025*.\n"
+            "2. Al menos *5 meses de permanencia continuada*.\n"
+            "3. *No tener antecedentes penales graves* en España ni en tu país de origen.\n"
+            "4. No representar una amenaza para el orden público."
         ),
     },
-    "documentos": {
-        "title": "Documentos necesarios",
-        "keywords": ["documento", "papeles", "necesito", "falta", "preparar"],
-        "text": (
-            "*Documentación necesaria:*\n\n"
-            "1. *Pasaporte en vigor.* Si está vencido, renuévelo cuanto antes.\n"
-            "2. *Certificado de antecedentes penales* de su país de origen "
-            "(y de cualquier país donde haya residido en los últimos 5 años). "
-            "Debe estar apostillado o legalizado, y traducido si no está en español.\n"
-            "3. *Certificado de empadronamiento* o equivalente.\n"
-            "4. *Dos fotografías* tipo carnet recientes.\n"
-            "5. *Pruebas de estancia continuada:* al menos dos documentos "
-            "con fechas que acrediten su presencia en España "
-            "(facturas, extractos bancarios, contrato de alquiler, tarjeta sanitaria, "
-            "recibos de Western Union o Ria, certificado de escolarización de hijos…).\n"
-            "6. *Tasa administrativa:* €38,28 (se abona al gobierno al presentar).\n\n"
-            "Le ayudamos a revisar y completar toda esta documentación."
-        ),
-    },
-    "plazos": {
-        "title": "Plazos y fechas clave",
-        "keywords": ["plazo", "fecha", "cuándo", "tiempo", "abril", "junio", "deadline"],
-        "text": (
-            "*Calendario previsto:*\n\n"
-            "Febrero-marzo 2026 — Tramitación del Real Decreto.\n"
-            "Principios de abril 2026 — Apertura del plazo de solicitudes.\n"
-            "*30 de junio de 2026* — Cierre del plazo.\n\n"
-            "Una vez presentada la solicitud:\n"
-            "- Admisión a trámite: máximo 15 días.\n"
-            "- Con la admisión, se obtiene autorización *provisional* para trabajar.\n"
-            "- Resolución final: aproximadamente 3 meses.\n\n"
-            "Recomendamos preparar la documentación *ahora* para evitar "
-            "la saturación de los últimos días."
-        ),
-    },
-    "precio": {
-        "title": "Nuestras tarifas",
-        "keywords": ["precio", "cuesta", "cuánto", "tarifa", "pagar", "caro", "barato", "dinero"],
-        "text": (
-            "*Nuestras tarifas — sin sorpresas:*\n\n"
-            "Fase 1 · Preparación: *Gratuito*\n"
-            "  Verificación de elegibilidad, subida de documentos, revisión preliminar.\n\n"
-            "Fase 2 · Revisión legal: *€39*\n"
-            "  Análisis completo, informe detallado, plan personalizado.\n\n"
-            "Fase 3 · Procesamiento: *€150*\n"
-            "  Expediente legal, formularios, revisión final de abogado.\n\n"
-            "Fase 4 · Presentación: *€110*\n"
-            "  Presentación oficial, seguimiento hasta resolución.\n\n"
-            "*Total servicio: €299*\n"
-            "Tasas del gobierno (aparte): €38,28 + ~€16 (TIE).\n\n"
-            "A modo de referencia, un abogado generalista cobra entre €500 y €1.000 "
-            "por un servicio similar. Las gestorías, entre €300 y €600, pero sin "
-            "supervisión de abogado colegiado."
-        ),
-    },
-    "trabajo": {
-        "title": "Autorización de trabajo",
-        "keywords": ["trabajo", "trabajar", "contrato", "empleo", "autónom", "cuenta propia"],
-        "text": (
-            "*Autorización de trabajo:*\n\n"
-            "Desde que su solicitud sea *admitida a trámite* (máximo 15 días "
-            "tras la presentación), obtendrá una autorización provisional para "
-            "trabajar legalmente en toda España.\n\n"
-            "Esto incluye:\n"
-            "- Trabajo por cuenta ajena en cualquier sector.\n"
-            "- Trabajo por cuenta propia (autónomo).\n"
-            "- Posibilidad de firmar contratos y darse de alta en la Seguridad Social.\n\n"
-            "No se requiere oferta de empleo previa para solicitar la regularización."
-        ),
-    },
-    "familia": {
-        "title": "Hijos menores y familia",
-        "keywords": ["hijo", "hija", "menor", "familia", "niño", "bebé", "esposa", "pareja"],
-        "text": (
-            "*Regularización de menores y familia:*\n\n"
-            "Los hijos e hijas menores de edad que se encuentren en España "
-            "pueden regularizarse *simultáneamente* con el solicitante.\n\n"
-            "Ventaja importante: el permiso para menores será de *5 años* "
-            "(no 1 año como el del adulto).\n\n"
-            "Documentación adicional para menores:\n"
-            "- Pasaporte del menor.\n"
-            "- Partida de nacimiento apostillada.\n"
-            "- Certificado de escolarización (si está en edad escolar).\n"
-            "- Libro de familia, si lo tiene.\n\n"
-            "Descuentos familiares:\n"
-            "- 2.ª persona: 18% de descuento.\n"
-            "- 3.ª persona en adelante: 25% de descuento."
-        ),
-    },
-    "antecedentes": {
-        "title": "Antecedentes penales",
-        "keywords": ["antecedente", "penal", "criminal", "apostilla", "récord", "delito"],
-        "text": (
-            "*Certificado de antecedentes penales:*\n\n"
-            "Es obligatorio presentar un certificado *sin antecedentes* de:\n"
-            "- Su país de origen.\n"
-            "- Cualquier otro país donde haya residido en los últimos 5 años.\n\n"
-            "El documento debe estar:\n"
-            "- *Apostillado* (Convenio de La Haya) o *legalizado* vía consular.\n"
-            "- *Traducido al español* por traductor jurado (si no está en español).\n"
-            "- Emitido con una antigüedad máxima de 3-6 meses.\n\n"
-            "Opciones:\n"
-            "a) Lo gestiona usted mismo — le proporcionamos instrucciones detalladas.\n"
-            "b) Lo gestionamos nosotros — entre €35 y €79 según el país.\n\n"
-            "Si su país tiene un sistema online, puede ser rápido. "
-            "En caso contrario, le recomendamos empezar cuanto antes."
-        ),
-    },
-    "confianza": {
-        "title": "Sobre Pombo & Horowitz",
-        "keywords": ["confia", "estafa", "seguro", "fraude", "real", "legítim", "fiar", "quiénes"],
-        "text": (
-            "*Sobre Pombo & Horowitz Abogados:*\n\n"
-            "- Fundado en 1988. Más de 35 años de ejercicio.\n"
-            "- Más de 12.000 casos de extranjería gestionados.\n"
-            "- Abogados colegiados en el ICAM (Ilustre Colegio de Abogados de Madrid).\n"
-            "- Oficina física: Calle Serrano, Madrid.\n"
-            "- Puede verificar nuestra colegiación en icam.es.\n\n"
-            "Diferencias con gestorías y servicios no regulados:\n"
-            "- Un abogado colegiado firma y responde personalmente de su trabajo.\n"
-            "- Estamos sujetos al código deontológico del Colegio de Abogados.\n"
-            "- Si algo sale mal, tiene a quién reclamar.\n\n"
-            "No cobramos nada hasta que usted haya comprobado nuestro trabajo."
-        ),
-    },
-    "asilo": {
-        "title": "Solicitantes de asilo / protección internacional",
-        "keywords": ["asilo", "refugi", "protección internacional", "tarjeta roja", "hoja blanca"],
-        "text": (
-            "*Si tiene una solicitud de protección internacional:*\n\n"
-            "Puede acogerse a la regularización siempre que la solicitud "
-            "de asilo se hubiera presentado *antes del 31 de diciembre de 2025*.\n\n"
-            "Proceso:\n"
-            "- Al solicitar la regularización, su expediente de asilo queda *suspendido* "
-            "(no cerrado definitivamente).\n"
-            "- Si la regularización se resuelve favorablemente, el asilo se archiva.\n"
-            "- Si se deniega, su solicitud de asilo se reactiva.\n\n"
-            "Es importante valorar las ventajas: la regularización ofrece "
-            "autorización de trabajo inmediata (con la admisión a trámite), "
-            "algo que la vía de asilo no siempre proporciona con la misma rapidez."
-        ),
-    },
-    "despues": {
-        "title": "Después de la regularización",
-        "keywords": ["después", "luego", "siguiente", "renovar", "nacionalidad", "permanente"],
-        "text": (
-            "*Después de obtener la autorización:*\n\n"
-            "1. Recibirá un permiso de residencia y trabajo de *1 año*.\n"
-            "2. Deberá solicitar la *TIE* (Tarjeta de Identidad de Extranjero).\n"
-            "3. Al vencer el año, deberá renovar por la vía ordinaria "
-            "(arraigo social, laboral, familiar, etc.).\n\n"
-            "Camino hacia la nacionalidad:\n"
-            "- Ciudadanos iberoamericanos: 2 años de residencia legal.\n"
-            "- Resto de nacionalidades: 10 años.\n"
-            "- El tiempo en situación irregular *no cuenta*.\n"
-            "- Esta regularización inicia el cómputo.\n\n"
-            "Le acompañamos también en los pasos posteriores."
-        ),
-    },
-    "caro": {
-        "title": "Comparativa de precios",
-        "keywords": ["caro", "barato", "much", "alcanza", "económic"],
-        "text": (
-            "*Entendemos que es una inversión importante.*\n\n"
-            "Comparativa de mercado:\n\n"
-            "Gestorías tradicionales: €300-600\n"
-            "  Sin abogados, sin garantías, pago por adelantado.\n\n"
-            "Abogados generalistas: €500-1.000\n"
-            "  Sin especialización en extranjería.\n\n"
-            "Pombo & Horowitz: €299 total\n"
-            "  Abogados colegiados especializados.\n"
-            "  38 años de experiencia.\n"
-            "  Pago progresivo (no todo de golpe).\n"
-            "  Primera fase completamente gratuita.\n\n"
-            "Además, un error en la solicitud puede significar la denegación "
-            "y la pérdida de la oportunidad. El coste de no hacerlo bien "
-            "es mucho mayor que el de hacerlo con profesionales."
-        ),
-    },
-    # === GROK RESEARCH ADDITIONS (2026-02-05) ===
-    "vulnerabilidad": {
-        "title": "No necesitas contrato de trabajo",
+    "contrato_trabajo": {
+        "title": "¿Necesito contrato de trabajo?",
         "keywords": ["contrato", "oferta", "empleador", "vulnerable", "vulnerabilidad",
-                     "patron", "sin empleo", "trabajo necesito", "me piden contrato"],
+                     "patron", "sin empleo", "me piden contrato"],
         "text": (
-            "*No necesitas oferta de trabajo.*\n\n"
-            "A diferencia del proceso de 2005, este decreto presume "
-            "*vulnerabilidad* por estar en situación irregular.\n\n"
-            "Esto significa:\n"
-            "- NO necesita un contrato de trabajo.\n"
-            "- NO necesita un empleador que le patrocine.\n"
-            "- NO necesita demostrar ingresos mínimos.\n\n"
-            "El decreto reconoce que estar sin papeles ya es una situación "
-            "de vulnerabilidad. Es la diferencia más grande con procesos anteriores.\n\n"
-            "Solo necesita demostrar:\n"
-            "1. Que llegó antes del 31/12/2025.\n"
-            "2. Que lleva 5+ meses en España.\n"
-            "3. Que no tiene antecedentes penales graves."
+            "*¿Necesito un contrato de trabajo para aplicar?*\n\n"
+            "*NO.* Este decreto incluye una \"cláusula de vulnerabilidad\" — "
+            "se presume que cualquier persona en situación irregular es vulnerable. "
+            "*No necesitas oferta de empleo* ni contrato para aplicar."
         ),
     },
-    "pruebas_residencia": {
-        "title": "Documentos que sirven como prueba",
-        "keywords": ["prueba", "demostrar", "no tengo empadronamiento", "qué sirve",
-                     "prueba de residencia", "cómo demuestro", "qué documentos sirven"],
+    "nacionalidad": {
+        "title": "¿Importa mi nacionalidad?",
+        "keywords": ["nacionalidad", "país", "colombiano", "venezolano", "peruano",
+                     "cualquier país"],
         "text": (
-            "*El decreto acepta CUALQUIER documento público o privado.*\n\n"
-            "No necesita empadronamiento obligatoriamente. Sirven combinaciones de:\n\n"
-            "🏠 *VIVIENDA (10 tipos):*\n"
-            "• Contrato de alquiler\n"
-            "• Factura de luz (Endesa, Iberdrola, Naturgy)\n"
-            "• Factura de agua\n"
-            "• Factura de gas\n"
-            "• Recibo de comunidad de vecinos\n"
-            "• Seguro del hogar\n"
-            "• Certificado de convivencia\n"
-            "• Carta del propietario\n"
-            "• Recibos de Airbnb/alquiler temporal\n"
-            "• Domiciliación bancaria de suministros\n\n"
-            "🏥 *MÉDICOS (8 tipos):*\n"
-            "• Tarjeta sanitaria (SIP/TSI)\n"
-            "• Citas médicas del centro de salud\n"
-            "• Recetas médicas\n"
-            "• Informes de urgencias\n"
-            "• Cartilla de vacunación\n"
-            "• Facturas de clínicas privadas\n"
-            "• Recetas de farmacia\n"
-            "• Citas de dentista/óptica\n\n"
-            "🏦 *BANCARIOS (8 tipos):*\n"
-            "• Extractos bancarios (cualquier banco)\n"
-            "• Tarjeta de débito con fecha de emisión\n"
-            "• Recibos de Western Union/Ria/MoneyGram\n"
-            "• Movimientos de Revolut/N26/Wise\n"
-            "• Bizum recibidos/enviados\n"
-            "• Contratos de cuenta bancaria\n"
-            "• Certificados de titularidad\n"
-            "• Recibos de cajero automático\n\n"
-            "🚌 *TRANSPORTE (6 tipos):*\n"
-            "• Abono transporte mensual\n"
-            "• Billetes de Renfe/AVE\n"
-            "• Recibos de Cabify/Uber/Bolt\n"
-            "• Billetes de autobús interurbano\n"
-            "• Multas de tráfico/transporte\n"
-            "• Recibos de BiciMAD/patinetes\n\n"
-            "📚 *EDUCACIÓN (5 tipos):*\n"
-            "• Matrícula escolar (suya o hijos)\n"
-            "• Cursos de español/formación\n"
-            "• Certificados de asistencia\n"
-            "• Notas/boletines escolares\n"
-            "• Recibos de academias\n\n"
-            "💼 *TRABAJO (6 tipos):*\n"
-            "• Nóminas (aunque sean antiguas)\n"
-            "• Contratos de trabajo\n"
-            "• Registros de Glovo/Uber Eats/Deliveroo\n"
-            "• Facturas como autónomo\n"
-            "• Alta en Seguridad Social\n"
-            "• Vida laboral (aunque esté vacía)\n\n"
-            "📱 *VIDA DIARIA (9 tipos):*\n"
-            "• Facturas de móvil (Movistar, Vodafone, Orange)\n"
-            "• Contratos de telefonía/internet\n"
-            "• Abono de gimnasio\n"
-            "• Correo postal recibido\n"
-            "• Paquetes de Amazon/Aliexpress\n"
-            "• Suscripciones (Netflix, Spotify)\n"
-            "• Recibos del veterinario\n"
-            "• Carné de biblioteca\n"
-            "• Fotos con geolocalización en España\n\n"
-            "⛪ *COMUNIDAD (5 tipos):*\n"
-            "• Certificado de iglesia/mezquita/sinagoga\n"
-            "• Voluntariado en ONGs\n"
-            "• Membresía de asociaciones\n"
-            "• Participación en eventos comunitarios\n"
-            "• Cartas de vecinos/conocidos\n\n"
-            "💡 *CONSEJO:* Combinar 3-5 documentos de diferentes categorías. "
-            "Más documentos = menos riesgo de rechazo."
+            "*¿Importa mi nacionalidad?*\n\n"
+            "No. El decreto aplica a *todas las nacionalidades* sin distinción. "
+            "Aunque la mayoría serán latinoamericanos (~90%), cualquier persona "
+            "que cumpla los requisitos puede aplicar."
         ),
     },
-    "aprobacion": {
-        "title": "Probabilidades de aprobación",
-        "keywords": ["probabilidad", "aprobar", "rechazar", "funciona", "posibilidades",
-                     "me van a aprobar", "van a rechazar", "qué posibilidades"],
+    "tiempo_espana": {
+        "title": "¿Cuánto tiempo debo llevar en España?",
+        "keywords": ["cuánto tiempo", "años", "meses", "llevo", "permanencia"],
         "text": (
-            "*Basado en el proceso de 2005 (el último en España):*\n\n"
-            "- Se aprobaron entre el 80-90% de las solicitudes.\n"
-            "- El gobierno ha diseñado este decreto para ser flexible.\n"
-            "- Los expertos esperan un umbral bajo de exigencia.\n\n"
-            "No podemos garantizar la aprobación de ningún caso individual. "
-            "Pero si cumple los requisitos básicos y presenta documentación "
-            "razonable, las probabilidades están muy a su favor.\n\n"
-            "El gobierno quiere regularizar — ha diseñado el proceso para "
-            "aprobar, no para rechazar. Nuestro trabajo es asegurarnos de que "
-            "su solicitud sea lo más fuerte posible."
+            "*¿Cuánto tiempo debo llevar en España?*\n\n"
+            "Debes haber llegado a España *antes del 31 de diciembre de 2025* "
+            "y demostrar al menos *5 meses de permanencia continuada* al momento "
+            "de presentar tu solicitud."
         ),
     },
-    "presentacion_online": {
-        "title": "La presentación es 100% online",
-        "keywords": ["presencial", "oficina", "telemático", "online", "internet",
-                     "hay que ir", "cita previa", "cómo se presenta"],
+    "turista": {
+        "title": "¿Puedo aplicar si entré como turista?",
+        "keywords": ["turista", "visa", "me quedé", "quedado", "overstay"],
         "text": (
-            "*Las solicitudes se presentan de forma telemática.*\n\n"
-            "No necesita ir a ninguna oficina:\n"
-            "- No necesita cita previa.\n"
-            "- No necesita hacer cola.\n"
-            "- Autorización provisional de trabajo inmediata al presentar.\n\n"
-            "Nosotros nos encargamos de:\n"
-            "- Preparar toda la documentación.\n"
-            "- Revisarla legalmente.\n"
-            "- Presentarla por usted de forma digital.\n"
-            "- Dar seguimiento hasta la resolución."
+            "*¿Puedo aplicar si entré como turista y me quedé?*\n\n"
+            "Sí. La forma de entrada *no importa*. Lo que importa es demostrar "
+            "que estabas en España antes del 31/12/2025 y que has permanecido "
+            "de forma continuada."
         ),
     },
-    "diferencia_2005": {
-        "title": "Diferencias con el proceso de 2005",
-        "keywords": ["2005", "anterior", "diferencia", "la última vez", "proceso anterior"],
+    "denegacion_previa": {
+        "title": "¿Puedo aplicar si me denegaron antes?",
+        "keywords": ["denegaron", "denegado", "rechazaron", "negaron",
+                     "denegación previa", "me rechazaron"],
         "text": (
-            "*Diferencias con el proceso de 2005:*\n\n"
-            "2005: Necesitaba contrato de trabajo.\n"
-            "2026: NO necesita contrato. ✅\n\n"
-            "2005: Solo trabajadores.\n"
-            "2026: Incluye vulnerabilidad. ✅\n\n"
-            "2005: Presencial.\n"
-            "2026: 100% online. ✅\n\n"
-            "2005: Más documentación exigida.\n"
-            "2026: Más flexible en pruebas. ✅\n\n"
-            "2005: 80-90% aprobación.\n"
-            "2026: Expectativa similar o mejor. ✅\n\n"
-            "La diferencia más importante: en 2005 necesitaba un empleador. "
-            "En 2026, NO."
+            "*¿Puedo aplicar si ya me denegaron un permiso antes?*\n\n"
+            "Sí, puedes aplicar. Una denegación previa de arraigo u otro permiso "
+            "*no te descalifica* automáticamente. Incluso puedes tener un arraigo "
+            "en trámite y solicitar esta regularización en paralelo."
         ),
     },
-    "plazos_detalle": {
-        "title": "Fechas clave detalladas",
-        "keywords": ["plazo detalle", "calendario", "cuánto tarda", "resolución",
-                     "admisión", "provisional"],
+    "orden_expulsion": {
+        "title": "¿Puedo aplicar con orden de expulsión?",
+        "keywords": ["expulsión", "deportación", "orden", "expulsar", "deportar"],
         "text": (
-            "*Calendario completo:*\n\n"
-            "Aprobación del decreto: 27 de enero de 2026. ✅\n"
-            "Plazo de solicitud: 1 de abril — 30 de junio de 2026.\n"
-            "Duración: 3 meses exactos, sin prórroga confirmada.\n\n"
-            "Tras presentar la solicitud:\n"
-            "- Admisión inicial: máximo 15 días.\n"
-            "- Autorización provisional de trabajo: inmediata.\n"
-            "- Resolución final: máximo 3 meses.\n\n"
-            "Recomendación: no espere al último momento. Prepare sus documentos "
-            "AHORA para presentar en abril. Los primeros en presentar = "
-            "primeros en recibir respuesta."
+            "*¿Puedo aplicar si tengo una orden de expulsión?*\n\n"
+            "Depende. Si la orden está en vigor y activa, probablemente no. "
+            "Consulta tu caso específico con un abogado antes de presentar."
         ),
     },
-    # === v5.1.0 ADDITIONS ===
+    "solicitantes_asilo": {
+        "title": "¿Qué pasa con solicitantes de asilo?",
+        "keywords": ["asilo", "refugi", "protección internacional", "tarjeta roja"],
+        "text": (
+            "*¿Qué pasa con los solicitantes de asilo?*\n\n"
+            "Los solicitantes de protección internacional que hayan presentado "
+            "su solicitud antes del 31/12/2025 también pueden acogerse a esta "
+            "regularización, con requisitos específicos."
+        ),
+    },
+
+    # === ANTECEDENTES PENALES ===
+    "antecedentes": {
+        "title": "¿Qué pasa si tengo antecedentes?",
+        "keywords": ["antecedente", "penal", "criminal", "delito", "récord"],
+        "text": (
+            "*¿Qué pasa si tengo antecedentes penales?*\n\n"
+            "Depende de la gravedad. Delitos menores generalmente no descalifican. "
+            "Delitos graves (violencia, narcotráfico, delitos sexuales) sí pueden "
+            "descalificarte. También se revisará que no tengas problemas graves "
+            "con la policía u otros cuerpos de seguridad."
+        ),
+    },
+    "certificado_antecedentes": {
+        "title": "¿Necesito certificado de mi país?",
+        "keywords": ["certificado antecedentes", "apostilla", "legalizado", "traducido"],
+        "text": (
+            "*¿Necesito certificado de antecedentes de mi país?*\n\n"
+            "Sí. Necesitas certificado de antecedentes penales de tu país de origen, "
+            "debidamente *legalizado o apostillado* y traducido si no está en español. "
+            "Algunos países permiten solicitarlo online a través del consulado.\n\n"
+            "Solicítalo *YA* — los consulados se saturarán cerca de abril."
+        ),
+    },
+    "antecedentes_dificil": {
+        "title": "¿Si es difícil obtener el certificado?",
+        "keywords": ["difícil obtener", "tarda", "consulado saturado", "no llega",
+                     "más de un mes"],
+        "text": (
+            "*¿Y si en mi país es difícil obtener el certificado?*\n\n"
+            "Solicítalo con anticipación. Si tras solicitarlo pasa más de un mes "
+            "sin recibirlo, podrás acreditarlo con el justificante de solicitud. "
+            "Consulta con tu consulado las opciones disponibles."
+        ),
+    },
+    "validez_antecedentes": {
+        "title": "¿Cuánto tiempo de validez tienen?",
+        "keywords": ["validez", "vigencia certificado", "caduca", "3 meses"],
+        "text": (
+            "*¿Cuánto tiempo de validez tienen los certificados de antecedentes?*\n\n"
+            "Generalmente tienen validez de *3 meses*. Recomendamos solicitarlos "
+            "en marzo 2026 para que estén vigentes al momento de presentar tu "
+            "solicitud en abril-junio."
+        ),
+    },
+
+    # === DOCUMENTOS NECESARIOS ===
+    "documentos_necesarios": {
+        "title": "¿Qué documentos necesito?",
+        "keywords": ["documento", "papeles", "necesito", "falta", "preparar",
+                     "qué necesito"],
+        "text": (
+            "*¿Qué documentos necesito para aplicar?*\n\n"
+            "Documentos básicos:\n"
+            "1. *Pasaporte vigente.*\n"
+            "2. *Certificado de antecedentes penales* de tu país "
+            "(legalizado y traducido).\n"
+            "3. *Pruebas de presencia* en España antes del 31/12/2025.\n"
+            "4. *Pruebas de permanencia continuada* de 5 meses."
+        ),
+    },
+    "prueba_llegada": {
+        "title": "¿Cómo demuestro presencia antes del 31/12?",
+        "keywords": ["demostrar presencia", "sello entrada", "billete avión",
+                     "31 diciembre", "primer documento"],
+        "text": (
+            "*¿Cómo demuestro que estaba en España antes del 31/12/2025?*\n\n"
+            "El primer documento es clave: pasaporte con sello de entrada, "
+            "billete de avión, o cualquier factura/recibo con tu nombre y "
+            "fecha anterior al 31 de diciembre de 2025."
+        ),
+    },
+    "prueba_permanencia": {
+        "title": "¿Cómo demuestro los 5 meses?",
+        "keywords": ["prueba residencia", "demostrar permanencia", "qué sirve",
+                     "cómo demuestro", "qué documentos sirven", "5 meses"],
+        "text": (
+            "*¿Cómo demuestro los 5 meses de permanencia continuada?*\n\n"
+            "Cualquier documento con tu nombre, dirección en España, y fecha: "
+            "facturas de luz/agua/internet, contratos de alquiler, empadronamiento, "
+            "recibos de envío de dinero, extractos bancarios, citas médicas, "
+            "recibos de compras, recargas de abono transporte, recibos de paquetería "
+            "(NACEX, SEUR, etc.), membresías de gimnasio, y más de 40 tipos de "
+            "documentos públicos o privados."
+        ),
+    },
     "sin_empadronamiento": {
-        "title": "No tengo empadronamiento",
+        "title": "¿Qué pasa si no tengo empadronamiento?",
         "keywords": ["no tengo empadronamiento", "sin empadronamiento", "no estoy empadronado",
-                     "no me quieren empadronar", "empadronamiento imposible"],
+                     "no me quieren empadronar", "padrón"],
         "text": (
-            "*¿No tiene empadronamiento? No se preocupe.*\n\n"
-            "El empadronamiento es la prueba más fuerte, pero *NO es obligatorio*. "
-            "El decreto acepta cualquier combinación de documentos.\n\n"
-            "Alternativas igual de válidas:\n"
-            "- Contrato o recibos de alquiler\n"
-            "- Facturas de luz, agua, gas o internet\n"
-            "- Extractos bancarios con actividad en España\n"
-            "- Tarjetas Revolut, N26, Wise con transacciones locales\n"
-            "- Recibos de Western Union o Ria\n"
-            "- Citas médicas o tarjeta sanitaria\n"
-            "- Abono transporte con cargas\n"
-            "- Registros de Glovo, Uber Eats, Deliveroo\n\n"
-            "Con 3-5 documentos de diferentes categorías tiene opciones sólidas. "
-            "Muchas personas han conseguido el arraigo sin empadronamiento.\n\n"
-            "¿Quiere que le ayudemos a identificar qué documentos puede tener?"
+            "*¿No tienes empadronamiento? No te preocupes.*\n\n"
+            "El empadronamiento *NO es obligatorio*. Puedes demostrar residencia "
+            "con: facturas de suministros, contrato de alquiler, extractos bancarios "
+            "con dirección, cartas oficiales, recibos de paquetería, informes "
+            "médicos, etc."
         ),
     },
-    "viajar_pendiente": {
-        "title": "¿Puedo viajar con la solicitud pendiente?",
-        "keywords": ["viajar", "salir de españa", "vuelo", "ir a mi país", "vacaciones"],
+    "documentos_otro_nombre": {
+        "title": "¿Sirven documentos a nombre de otro?",
+        "keywords": ["otro nombre", "nombre de otra persona", "factura no es mía",
+                     "compañero"],
         "text": (
-            "*Viajar durante el proceso:*\n\n"
-            "⚠️ *Antes de presentar la solicitud:* puede viajar dentro de España "
-            "sin problema. Salir de España es arriesgado — podría tener "
-            "dificultades para regresar.\n\n"
-            "✅ *Después de la admisión a trámite:* recibirá una autorización "
-            "provisional. Consulte con su abogado antes de viajar al extranjero "
-            "durante este período.\n\n"
-            "Recomendación: no viaje fuera de España hasta tener la resolución favorable."
+            "*¿Sirven los documentos a nombre de otra persona?*\n\n"
+            "Parcialmente. Si vives con alguien y las facturas están a su nombre, "
+            "necesitas documentos adicionales que te vinculen a esa dirección "
+            "(contrato de subarrendamiento, declaración del titular, documentos "
+            "propios con esa dirección)."
+        ),
+    },
+    "traduccion": {
+        "title": "¿Necesito traducir mis documentos?",
+        "keywords": ["traducir", "traducción", "traductor jurado", "idioma", "otro idioma"],
+        "text": (
+            "*¿Necesito traducir mis documentos?*\n\n"
+            "Los documentos en español no necesitan traducción. Los documentos "
+            "en otros idiomas deben traducirse por *traductor jurado*."
         ),
     },
     "pasaporte_vencido": {
-        "title": "¿Qué hago si mi pasaporte está vencido?",
+        "title": "¿Mi pasaporte puede estar vencido?",
         "keywords": ["pasaporte vencido", "pasaporte caducado", "renovar pasaporte",
-                     "sin pasaporte", "pasaporte expirado"],
+                     "pasaporte expirado"],
         "text": (
-            "*Pasaporte vencido:*\n\n"
-            "Necesita un pasaporte *en vigor* para la solicitud. Si está vencido:\n\n"
-            "1. Contacte con el consulado de su país en España para renovarlo.\n"
-            "2. Pida cita lo antes posible — los consulados pueden saturarse.\n"
-            "3. Mientras tanto, puede ir preparando el resto de documentación.\n\n"
-            "El plazo de solicitud no abre hasta abril. Tiene tiempo, pero "
-            "no lo deje para el último momento.\n\n"
-            "¿Necesita datos de contacto de su consulado?"
+            "*¿Mi pasaporte puede estar vencido?*\n\n"
+            "*NO.* Tu pasaporte *DEBE* estar vigente. Si está vencido o próximo a "
+            "vencer, renuévalo *AHORA* en tu consulado. No esperes a abril."
         ),
     },
-    "arraigo_en_curso": {
-        "title": "Ya tengo un arraigo en curso",
-        "keywords": ["arraigo", "arraigo social", "arraigo laboral", "ya tengo expediente",
-                     "otra solicitud", "en trámite"],
+    "pasaporte_perdido": {
+        "title": "¿Qué hago si perdí mi pasaporte?",
+        "keywords": ["perdí pasaporte", "sin pasaporte", "robaron pasaporte"],
         "text": (
-            "*Si ya tiene un arraigo en curso:*\n\n"
-            "Puede acogerse a la regularización extraordinaria aunque tenga "
-            "otra solicitud pendiente. Ventajas:\n\n"
-            "- La regularización es más rápida (resolución en ~3 meses).\n"
-            "- NO necesita contrato de trabajo.\n"
-            "- Autorización provisional de trabajo inmediata.\n\n"
-            "Su solicitud de arraigo quedaría suspendida (no cerrada). "
-            "Si la regularización se aprueba, el arraigo se archiva. "
-            "Si se deniega, el arraigo se reactiva.\n\n"
-            "Le recomendamos valorar ambas vías con un abogado."
+            "*¿Qué pasa si perdí mi pasaporte?*\n\n"
+            "Solicita uno nuevo en tu consulado *INMEDIATAMENTE*. Sin pasaporte "
+            "vigente no podrás completar la solicitud."
+        ),
+    },
+
+    # === PROCESO Y PLAZOS ===
+    "plazos": {
+        "title": "¿Cuándo puedo presentar?",
+        "keywords": ["plazo", "fecha", "cuándo", "abril", "junio", "deadline"],
+        "text": (
+            "*¿Cuándo puedo presentar mi solicitud?*\n\n"
+            "El plazo abre a principios de *abril de 2026* (fecha exacta por confirmar) "
+            "y cierra el *30 de junio de 2026*. Son aproximadamente 3 meses. "
+            "Es *improrrogable*."
+        ),
+    },
+    "como_presentar": {
+        "title": "¿Cómo se presenta la solicitud?",
+        "keywords": ["cómo presento", "dónde presento", "presencial", "telemática",
+                     "online", "internet"],
+        "text": (
+            "*¿Cómo se presenta la solicitud?*\n\n"
+            "Se podrá presentar de forma *telemática (online)* o presencial. "
+            "El gobierno recomienda la vía telemática para evitar colas y retrasos."
+        ),
+    },
+    "presentar_antes": {
+        "title": "¿Puedo presentar antes de abril?",
+        "keywords": ["antes de abril", "adelantar", "ya presentar"],
+        "text": (
+            "*¿Puedo presentar antes de abril?*\n\n"
+            "No. El sistema no aceptará solicitudes hasta que abra el plazo oficial. "
+            "Pero debes tener tu documentación lista *ANTES* de abril."
+        ),
+    },
+    "plazo_vencido": {
+        "title": "¿Qué pasa si no llego a junio?",
+        "keywords": ["no llego", "tarde", "después de junio", "improrrogable",
+                     "último momento"],
+        "text": (
+            "*¿Qué pasa si no llego a presentar antes del 30 de junio?*\n\n"
+            "Pierdes la oportunidad. Es un plazo *cerrado e improrrogable*. "
+            "No esperes al último momento — prepara todo ahora."
+        ),
+    },
+    "tiempo_respuesta": {
+        "title": "¿Cuánto tardan en responder?",
+        "keywords": ["tardan", "resolución", "respuesta", "cuánto esperar",
+                     "cuánto tarda"],
+        "text": (
+            "*¿Cuánto tardan en responder?*\n\n"
+            "El plazo máximo de tramitación es de *3 meses*. Pero con la mera "
+            "admisión a trámite (máximo 15 días), ya podrás residir y trabajar "
+            "provisionalmente."
+        ),
+    },
+    "trabajar_mientras_espero": {
+        "title": "¿Puedo trabajar mientras espero?",
+        "keywords": ["trabajar mientras", "provisional", "trabajar legalmente",
+                     "permiso trabajo"],
+        "text": (
+            "*¿Puedo trabajar mientras espero la resolución?*\n\n"
+            "*SÍ.* Desde que tu solicitud sea admitida a trámite (máximo 15 días), "
+            "podrás trabajar legalmente en cualquier sector y en cualquier parte "
+            "de España."
+        ),
+    },
+    "salir_espana": {
+        "title": "¿Puedo salir de España mientras espero?",
+        "keywords": ["salir de españa", "viajar mientras", "ir a mi país",
+                     "vuelo", "salir"],
+        "text": (
+            "*¿Puedo salir de España mientras espero la resolución?*\n\n"
+            "*NO recomendado.* Salir podría interpretarse como abandono de tu "
+            "solicitud o romper la continuidad de residencia. Espera hasta tener "
+            "el permiso en mano."
         ),
     },
     "denegacion": {
-        "title": "¿Qué pasa si me deniegan?",
+        "title": "¿Qué pasa si me niegan?",
         "keywords": ["denegar", "denegación", "rechazo", "recurso", "si me dicen que no",
                      "qué pasa si no"],
         "text": (
-            "*En caso de denegación:*\n\n"
-            "1. Tiene derecho a *recurso* (incluido en nuestro servicio).\n"
-            "2. La denegación NO implica expulsión automática.\n"
-            "3. Puede seguir optando a otras vías (arraigo social, laboral, etc.).\n\n"
-            "Basado en 2005, el 80-90% de solicitudes fueron aprobadas. "
-            "Las denegaciones suelen ser por:\n"
-            "- Antecedentes penales no declarados\n"
-            "- Documentación insuficiente (evitable con buena preparación)\n"
-            "- Entrada posterior al 31/12/2025\n\n"
-            "Nuestro trabajo es minimizar el riesgo de rechazo. "
-            "Y si ocurre, el recurso está incluido."
+            "*¿Qué pasa si me niegan la solicitud?*\n\n"
+            "Puedes recurrir la decisión. Tendrás plazo para presentar "
+            "alegaciones o recurso. Un abogado puede ayudarte con esto."
         ),
     },
+
+    # === COSTOS Y PAGOS ===
+    "costo": {
+        "title": "¿Cuánto cuesta la regularización?",
+        "keywords": ["precio", "cuesta", "cuánto cuesta", "tarifa", "caro", "barato",
+                     "dinero", "costo"],
+        "text": (
+            "*¿Cuánto cuesta la regularización?*\n\n"
+            "Tasas gubernamentales: tasa administrativa correspondiente (modelo 790).\n\n"
+            "Nuestro servicio de gestión completa: *€299* en fases.\n"
+            "Fase 1 gratis, Fase 2 €39, Fase 3 €150, Fase 4 €110."
+        ),
+    },
+    "por_que_pagar": {
+        "title": "¿Por qué usar un servicio?",
+        "keywords": ["por qué servicio", "gratis", "necesito abogado", "por qué pagar"],
+        "text": (
+            "*¿Por qué usar un servicio si el trámite es \"gratuito\"?*\n\n"
+            "Nuestro servicio cubre: verificación de elegibilidad, revisión legal "
+            "de documentos, preparación del expediente, presentación telemática, "
+            "y seguimiento hasta la resolución.\n\n"
+            "Un expediente mal preparado puede causar denegación — en 2005, el "
+            "10-20% fueron denegados, muchos por errores evitables."
+        ),
+    },
+    "solo_sin_abogado": {
+        "title": "¿Puedo hacerlo yo solo?",
+        "keywords": ["yo solo", "sin abogado", "hacer yo", "necesario abogado"],
+        "text": (
+            "*¿Puedo hacerlo yo solo sin abogado?*\n\n"
+            "Técnicamente sí. Pero un solo día de \"vacío\" en tu prueba de "
+            "permanencia, un documento mal presentado, o un error en el formulario "
+            "puede significar denegación. Cada caso es distinto."
+        ),
+    },
+    "fases_pago": {
+        "title": "¿Qué incluye cada fase?",
+        "keywords": ["fase", "etapa", "incluye", "paso"],
+        "text": (
+            "*¿Qué incluye cada fase de pago?*\n\n"
+            "*Fase 1 (GRATIS):* Verificación de elegibilidad + subir documentos.\n"
+            "*Fase 2 (€39):* Revisión legal completa.\n"
+            "*Fase 3 (€150):* Preparación del expediente.\n"
+            "*Fase 4 (€110):* Presentación y seguimiento."
+        ),
+    },
+
+    # === DESPUÉS DE LA SOLICITUD ===
+    "que_permiso": {
+        "title": "¿Qué permiso voy a recibir?",
+        "keywords": ["qué permiso", "autorización", "residencia temporal", "TIE"],
+        "text": (
+            "*¿Qué permiso voy a recibir?*\n\n"
+            "Autorización de residencia temporal con vigencia inicial de "
+            "*1 año*, renovable. Después te incorporas a las figuras ordinarias "
+            "del Reglamento de Extranjería."
+        ),
+    },
+    "trabajar_legal": {
+        "title": "¿Podré trabajar legalmente?",
+        "keywords": ["trabajar legalmente", "permiso trabajo", "autónomo", "alta"],
+        "text": (
+            "*¿Podré trabajar legalmente?*\n\n"
+            "Sí. La autorización incluye *permiso de trabajo desde el primer día*, "
+            "en cualquier sector y en cualquier parte de España. También puedes "
+            "darte de alta como autónomo."
+        ),
+    },
+    "viajar": {
+        "title": "¿Podré viajar fuera de España?",
+        "keywords": ["viajar después", "salir después", "TIE viajar"],
+        "text": (
+            "*¿Podré viajar fuera de España?*\n\n"
+            "Sí, una vez tengas el permiso (tarjeta TIE) en mano. Durante el "
+            "proceso de solicitud, no recomendamos salir del país."
+        ),
+    },
+    "traer_familia": {
+        "title": "¿Podré traer a mi familia?",
+        "keywords": ["familia", "hijo", "hija", "menor", "esposa", "pareja",
+                     "reagrupación"],
+        "text": (
+            "*¿Podré traer a mi familia?*\n\n"
+            "Los hijos menores que estén en España pueden regularizarse "
+            "simultáneamente. Para otros familiares, después podrás solicitar "
+            "*reagrupación familiar* (proceso separado con requisitos adicionales)."
+        ),
+    },
+    "nacionalidad_espanola": {
+        "title": "¿Me lleva a la nacionalidad española?",
+        "keywords": ["nacionalidad española", "ciudadanía", "iberoamericano",
+                     "cuántos años"],
+        "text": (
+            "*¿Este permiso me lleva a la nacionalidad española?*\n\n"
+            "Sí, eventualmente. Para ciudadanos de países iberoamericanos "
+            "(Colombia, Venezuela, Perú, etc.): tras *2 años* de residencia legal. "
+            "Para otras nacionalidades: generalmente 10 años."
+        ),
+    },
+
+    # === MIEDOS COMUNES ===
+    "seguridad_datos": {
+        "title": "¿Es seguro dar mis datos?",
+        "keywords": ["seguro", "datos", "deportar", "perseguir", "miedo", "riesgo"],
+        "text": (
+            "*¿Es seguro dar mis datos? ¿Me pueden deportar si me rechazan?*\n\n"
+            "El proceso está diseñado para proteger, no para perseguir. Una "
+            "denegación *NO activa automáticamente* un proceso de expulsión. "
+            "Miles de personas aplicaron en regularizaciones anteriores sin "
+            "consecuencias negativas por intentar."
+        ),
+    },
+    "es_real": {
+        "title": "¿Esto es real o es una estafa?",
+        "keywords": ["estafa", "real", "fraude", "verdad", "legítimo", "mentira"],
+        "text": (
+            "*¿Esto es real o es una estafa?*\n\n"
+            "Es 100% real. El Consejo de Ministros aprobó la tramitación del "
+            "Real Decreto el 27 de enero de 2026. Puedes verificarlo en "
+            "lamoncloa.gob.es y en el BOE cuando se publique el texto definitivo."
+        ),
+    },
+    "por_que_ahora": {
+        "title": "¿Por qué ahora y no antes?",
+        "keywords": ["por qué ahora", "por qué no antes", "1986", "historia"],
+        "text": (
+            "*¿Por qué ahora y no antes?*\n\n"
+            "Gobiernos de distintos colores políticos han realizado "
+            "regularizaciones desde 1986 hasta 2005. Esta retoma una "
+            "iniciativa ciudadana respaldada por más de 700.000 firmas "
+            "y apoyada por una amplia mayoría del Congreso."
+        ),
+    },
+    "estafa_acelerar": {
+        "title": "¿Puedo pagar para \"acelerar\"?",
+        "keywords": ["acelerar", "rápido", "urgente", "pagar más"],
+        "text": (
+            "*¿Qué pasa si alguien me cobra por \"acelerar\" el trámite?*\n\n"
+            "⚠️ *CUIDADO.* No existe forma de \"acelerar\" el proceso oficial. "
+            "Desconfía de quien te ofrezca esto. Trabaja solo con profesionales "
+            "registrados y verifica sus credenciales."
+        ),
+    },
+
+    # === REFERRAL (kept for /referidos command) ===
     "referidos": {
         "title": "Programa de referidos",
         "keywords": ["referido", "código", "amigo", "descuento", "compartir", "ganar", "crédito"],
@@ -2244,10 +2337,24 @@ def main_menu_kb(user: Dict) -> InlineKeyboardMarkup:
 
 
 def faq_menu_kb() -> InlineKeyboardMarkup:
+    """Show FAQ category buttons (accordion top level)."""
     btns = []
-    for key, faq in FAQ.items():
-        btns.append([InlineKeyboardButton(faq["title"], callback_data=f"fq_{key}")])
+    for cat_key, cat in FAQ_CATEGORIES.items():
+        btns.append([InlineKeyboardButton(cat["title"], callback_data=f"fcat_{cat_key}")])
     btns.append([InlineKeyboardButton("← Volver al menú", callback_data="back")])
+    return InlineKeyboardMarkup(btns)
+
+
+def faq_category_kb(cat_key: str) -> InlineKeyboardMarkup:
+    """Show question buttons within a FAQ category."""
+    cat = FAQ_CATEGORIES.get(cat_key, {})
+    btns = []
+    for faq_key in cat.get("keys", []):
+        faq = FAQ.get(faq_key)
+        if faq:
+            btns.append([InlineKeyboardButton(faq["title"], callback_data=f"fq_{faq_key}")])
+    btns.append([InlineKeyboardButton("← Todas las categorías", callback_data="m_faq")])
+    btns.append([InlineKeyboardButton("← Menú principal", callback_data="back")])
     return InlineKeyboardMarkup(btns)
 
 
@@ -2666,7 +2773,7 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "Tus amigos reciben €25 de descuento. Cuando pagues tu primera fase, tú también ganas €25 por cada amigo.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Ver qué documentos necesito", callback_data="fq_pruebas_residencia")],
+            [InlineKeyboardButton("Ver qué documentos necesito", callback_data="fq_documentos_necesarios")],
             [InlineKeyboardButton("Ver precios del servicio", callback_data="m_price")],
             [InlineKeyboardButton("Empezar a subir documentos", callback_data="m_upload")],
             [InlineKeyboardButton("Tengo más preguntas", callback_data="m_faq")],
@@ -2772,10 +2879,23 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             text = faq["text"].replace("{days}", str(days_left()))
             await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Más preguntas", callback_data="m_faq")],
-                    [InlineKeyboardButton("Menú principal", callback_data="back")],
+                    [InlineKeyboardButton("📋 Todas las categorías", callback_data="m_faq")],
+                    [InlineKeyboardButton("← Menú principal", callback_data="back")],
                 ]))
             return ST_FAQ_ITEM
+        return ST_MAIN_MENU
+
+    # FAQ category callback routing
+    if d.startswith("fcat_"):
+        cat_key = d[5:]
+        cat = FAQ_CATEGORIES.get(cat_key)
+        if cat:
+            ctx.user_data["faq_cat"] = cat_key
+            await q.edit_message_text(
+                f"*{cat['title']}*\n\nSeleccione una pregunta:",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=faq_category_kb(cat_key))
+            return ST_FAQ_CATEGORY
         return ST_MAIN_MENU
 
     if d == "m_checklist":
@@ -2837,7 +2957,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ST_UPLOAD_PHOTO
 
     if d == "m_price":
-        await q.edit_message_text(FAQ["precio"]["text"], parse_mode=ParseMode.MARKDOWN,
+        await q.edit_message_text(FAQ["costo"]["text"], parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("← Volver", callback_data="back")],
             ]))
@@ -2896,7 +3016,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ST_MAIN_MENU
 
     if d == "m_faq":
-        await q.edit_message_text("*Preguntas frecuentes*\n\nSeleccione un tema:",
+        await q.edit_message_text("*Preguntas frecuentes*\n\nSeleccione una categoría:",
             parse_mode=ParseMode.MARKDOWN, reply_markup=faq_menu_kb())
         return ST_FAQ_MENU
 
@@ -3145,20 +3265,40 @@ async def handle_faq_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int
     await q.answer()
     d = q.data
 
+    # Category selected → show questions in that category
+    if d.startswith("fcat_"):
+        cat_key = d[5:]
+        cat = FAQ_CATEGORIES.get(cat_key)
+        if cat:
+            ctx.user_data["faq_cat"] = cat_key
+            await q.edit_message_text(
+                f"*{cat['title']}*\n\nSeleccione una pregunta:",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=faq_category_kb(cat_key))
+            return ST_FAQ_CATEGORY
+
+    # Question selected → show answer
     if d.startswith("fq_"):
         key = d[3:]
         faq = FAQ.get(key)
         if faq:
             text = faq["text"].replace("{days}", str(days_left()))
+            # Build back buttons — include back-to-category if available
+            btns = []
+            cat_key = ctx.user_data.get("faq_cat")
+            if cat_key and cat_key in FAQ_CATEGORIES:
+                btns.append([InlineKeyboardButton(
+                    f"← {FAQ_CATEGORIES[cat_key]['title']}",
+                    callback_data=f"fcat_{cat_key}")])
+            btns.append([InlineKeyboardButton("📋 Todas las categorías", callback_data="m_faq")])
+            btns.append([InlineKeyboardButton("← Menú principal", callback_data="back")])
             await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Más preguntas", callback_data="m_faq")],
-                    [InlineKeyboardButton("Menú principal", callback_data="back")],
-                ]))
+                reply_markup=InlineKeyboardMarkup(btns))
         return ST_FAQ_ITEM
 
     if d == "m_faq":
-        await q.edit_message_text("*Preguntas frecuentes*\n\nSeleccione un tema:",
+        await q.edit_message_text(
+            "*Preguntas frecuentes*\n\nSeleccione una categoría:",
             parse_mode=ParseMode.MARKDOWN, reply_markup=faq_menu_kb())
         return ST_FAQ_MENU
 
@@ -3470,7 +3610,7 @@ async def handle_free_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
         return ST_CONTACT
 
     if intent == "price":
-        await update.message.reply_text(FAQ["precio"]["text"], parse_mode=ParseMode.MARKDOWN,
+        await update.message.reply_text(FAQ["costo"]["text"], parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Volver al menú", callback_data="back")],
             ]))
@@ -3481,21 +3621,32 @@ async def handle_free_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
 
     # Route all intents to their FAQ entries
     intent_faq_map = {
-        "work": "vulnerabilidad",
-        "online_submission": "presentacion_online",
-        "approval_rate": "aprobacion",
-        "comparison_2005": "diferencia_2005",
+        "work": "contrato_trabajo",
+        "online_submission": "como_presentar",
         "help": "requisitos",
-        "family": "familia",
-        "deadline": "plazos_detalle",
-        "asylum": "asilo",
-        "trust": "confianza",
-        "documents": "pruebas_residencia",
+        "family": "traer_familia",
+        "deadline": "plazos",
+        "asylum": "solicitantes_asilo",
+        "trust": "es_real",
+        "documents": "documentos_necesarios",
         "no_empadronamiento": "sin_empadronamiento",
-        "travel": "viajar_pendiente",
+        "travel": "salir_espana",
         "expired_passport": "pasaporte_vencido",
-        "arraigo": "arraigo_en_curso",
         "denial": "denegacion",
+        "nationality": "nacionalidad",
+        "tourist_entry": "turista",
+        "prior_denial": "denegacion_previa",
+        "expulsion": "orden_expulsion",
+        "criminal_cert": "certificado_antecedentes",
+        "response_time": "tiempo_respuesta",
+        "work_while_waiting": "trabajar_mientras_espero",
+        "payment_phases": "fases_pago",
+        "permit_type": "que_permiso",
+        "spanish_nationality": "nacionalidad_espanola",
+        "safety": "seguridad_datos",
+        "scam_accelerate": "estafa_acelerar",
+        "why_now": "por_que_ahora",
+        "tiempo_espana": "tiempo_espana",
     }
     if intent in intent_faq_map:
         faq = FAQ.get(intent_faq_map[intent])
@@ -4478,7 +4629,7 @@ async def cmd_documentos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 async def cmd_ayuda(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     """Show FAQ menu: /ayuda"""
     await update.message.reply_text(
-        "*Preguntas frecuentes*\n\nSeleccione un tema:",
+        "*Preguntas frecuentes*\n\nSeleccione una categoría:",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=faq_menu_kb(),
     )
@@ -4665,6 +4816,9 @@ def main():
                 CallbackQueryHandler(handle_menu),
             ],
             ST_FAQ_MENU: [
+                CallbackQueryHandler(handle_faq_menu),
+            ],
+            ST_FAQ_CATEGORY: [
                 CallbackQueryHandler(handle_faq_menu),
             ],
             ST_FAQ_ITEM: [
