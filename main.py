@@ -3232,7 +3232,11 @@ async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_user(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Admin views user profile: /user <telegram_id>"""
-    if update.effective_user.id not in ADMIN_IDS:
+    caller_id = update.effective_user.id
+    logger.info(f"/user called by {caller_id}, ADMIN_IDS={ADMIN_IDS}")
+    if caller_id not in ADMIN_IDS:
+        logger.warning(f"/user denied for {caller_id} - not in ADMIN_IDS")
+        await update.message.reply_text(f"No autorizado. Tu ID: {caller_id}")
         return
     if not ctx.args:
         await update.message.reply_text("Uso: /user <telegram_id>")
@@ -3296,7 +3300,9 @@ async def cmd_user(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_docs(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Admin views user documents: /docs <telegram_id>"""
-    if update.effective_user.id not in ADMIN_IDS:
+    caller_id = update.effective_user.id
+    if caller_id not in ADMIN_IDS:
+        await update.message.reply_text(f"No autorizado. Tu ID: {caller_id}")
         return
     if not ctx.args:
         await update.message.reply_text("Uso: /docs <telegram_id>")
@@ -3338,7 +3344,9 @@ async def cmd_docs(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_doc(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Admin views a specific document file: /doc <file_id>"""
-    if update.effective_user.id not in ADMIN_IDS:
+    caller_id = update.effective_user.id
+    if caller_id not in ADMIN_IDS:
+        await update.message.reply_text(f"No autorizado. Tu ID: {caller_id}")
         return
     if not ctx.args:
         await update.message.reply_text("Uso: /doc <file_id>")
