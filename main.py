@@ -974,6 +974,20 @@ FAQ = {
             "Y si ocurre, el recurso está incluido."
         ),
     },
+    "referidos": {
+        "title": "Programa de referidos",
+        "keywords": ["referido", "código", "amigo", "descuento", "compartir", "ganar", "crédito"],
+        "text": (
+            "*Programa de referidos:*\n\n"
+            "*Para tu amigo:*\n"
+            "Si alguien usa tu código al registrarse, recibe €25 de descuento "
+            "en su primer pago.\n\n"
+            "*Para ti:*\n"
+            "Cuando pagues tu Fase 2 (€39) y tu amigo también pague, "
+            "ganas €25 de crédito que se aplica a tus siguientes pagos.\n\n"
+            "Puedes ver tu código y estadísticas con el comando /referidos."
+        ),
+    },
 }
 
 # =============================================================================
@@ -2571,8 +2585,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Pago recibido.\n\n"
             "Nuestro equipo revisará su documentación en las próximas 24-48 horas.\n"
             "Le notificaremos cuando esté listo para la siguiente fase.\n\n"
-            f"✓ Tu código de referido está activo: `{code}`\n\n"
-            "Ahora ganas €25 de crédito por cada amigo que pague usando tu código.",
+            f"Tu código está activo: `{code}`\n"
+            "Ganas €25 de crédito por cada amigo que pague.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📱 Compartir por WhatsApp", url=wa_url)],
