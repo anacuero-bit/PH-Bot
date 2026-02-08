@@ -1,13 +1,23 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v5.8.0 — Client Intake & Case Management
+PH-Bot v5.9.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
 Updated:    2026-02-08
 
 CHANGELOG:
 ----------
+v5.9.0 (2026-02-08)
+  - NEW: Phase 3 questionnaire (30 questions: personal data, address, employment, family, submission)
+  - NEW: phase3_answers DB column + migration (PostgreSQL + SQLite)
+  - NEW: Phase 3 handlers (handle_phase3_questionnaire, handle_phase3_text_answer)
+  - NEW: 3 FAQ entries (¿Por qué tantas preguntas?, ¿Por qué sois más baratos?, ¿Por qué pagar si puedo hacerlo yo?)
+  - NEW: Foreign antecedentes upsell after country selection (country-specific difficulty/time)
+  - FIX: Referral code shown at paid3, paid4, m_pay3, m_pay4 (was only at paid2)
+  - FIX: paid3 now starts Phase 3 questionnaire flow
+  - UPDATED: paid4 shows referral info after payment
+
 v5.8.0 (2026-02-08)
   - NEW: Phase 2 deep questionnaire (20 questions across 5 sections)
   - NEW: Personalized audit report generator (generate_phase2_report)
@@ -342,7 +352,9 @@ STRIPE_LINKS = {
     ST_FAQ_CATEGORY,
     ST_PHASE2_QUESTIONNAIRE,
     ST_PHASE2_TEXT_ANSWER,
-) = range(24)
+    ST_PHASE3_QUESTIONNAIRE,
+    ST_PHASE3_TEXT_ANSWER,
+) = range(26)
 
 # =============================================================================
 # REFERRAL SYSTEM
@@ -476,6 +488,103 @@ PHASE2_QUESTIONS = [
      "options": [("Sí, actualizado", "empad_current"), ("Sí, pero antiguo", "empad_old"),
                  ("Nunca me empadroné", "empad_never"), ("Me quitaron del padrón", "empad_removed")],
      "section": "Documentación"},
+]
+
+# =============================================================================
+# PHASE 3 QUESTIONNAIRE — Official form data collection
+# =============================================================================
+
+PHASE3_INTRO = (
+    "📝 *Preparación de tu Expediente*\n\n"
+    "Ahora necesitamos datos exactos para los formularios oficiales.\n"
+    "Por favor, responde con cuidado — estos datos van en tu solicitud."
+)
+
+PHASE3_COMPLETION = (
+    "✅ *Datos recibidos*\n\n"
+    "Ahora nuestro equipo:\n"
+    "1. Organizará tus documentos estratégicamente\n"
+    "2. Completará todos los formularios oficiales\n"
+    "3. Preparará la memoria de tu caso\n\n"
+    "Te avisaremos cuando tu expediente esté listo para revisión final.\n\n"
+    "⏱️ Tiempo estimado: 3-5 días laborables"
+)
+
+PHASE3_QUESTIONS = [
+    # SECTION 1: Personal Data
+    {"id": "p3_full_name", "text": "Nombre completo *exactamente* como aparece en tu pasaporte:", "type": "text",
+     "required": True, "section": "👤 Datos Personales"},
+    {"id": "p3_other_names", "text": "¿Has usado otros nombres o apellidos?", "type": "buttons",
+     "options": [("No", "no"), ("Sí", "yes")], "section": "👤 Datos Personales"},
+    {"id": "p3_other_names_detail", "text": "¿Cuáles?", "type": "text",
+     "condition_field": "p3_other_names", "condition_values": ["yes"], "section": "👤 Datos Personales"},
+    {"id": "p3_birth_date", "text": "Fecha de nacimiento (DD/MM/AAAA):", "type": "text",
+     "required": True, "section": "👤 Datos Personales"},
+    {"id": "p3_birth_place", "text": "Lugar de nacimiento (ciudad y país):", "type": "text",
+     "required": True, "section": "👤 Datos Personales"},
+    {"id": "p3_nationality", "text": "Nacionalidad:", "type": "text",
+     "required": True, "section": "👤 Datos Personales"},
+    {"id": "p3_passport_number", "text": "Número de pasaporte:", "type": "text",
+     "required": True, "section": "👤 Datos Personales"},
+    {"id": "p3_passport_expiry", "text": "Fecha de caducidad del pasaporte (DD/MM/AAAA):", "type": "text",
+     "required": True, "section": "👤 Datos Personales"},
+
+    # SECTION 2: Address & Contact
+    {"id": "p3_street", "text": "Calle y número:", "type": "text",
+     "required": True, "section": "📍 Dirección y Contacto"},
+    {"id": "p3_floor_door", "text": "Piso y puerta (si aplica):", "type": "text",
+     "section": "📍 Dirección y Contacto"},
+    {"id": "p3_postal_code", "text": "Código postal:", "type": "text",
+     "required": True, "section": "📍 Dirección y Contacto"},
+    {"id": "p3_city", "text": "Municipio:", "type": "text",
+     "required": True, "section": "📍 Dirección y Contacto"},
+    {"id": "p3_province", "text": "Provincia:", "type": "text",
+     "required": True, "section": "📍 Dirección y Contacto"},
+    {"id": "p3_same_address_card", "text": "¿Quieres recibir tu tarjeta en esta dirección?", "type": "buttons",
+     "options": [("Sí", "yes"), ("No, otra dirección", "no")], "section": "📍 Dirección y Contacto"},
+    {"id": "p3_card_address", "text": "Dirección para recibir la tarjeta:", "type": "text",
+     "condition_field": "p3_same_address_card", "condition_values": ["no"], "section": "📍 Dirección y Contacto"},
+    {"id": "p3_phone", "text": "Teléfono móvil:", "type": "text",
+     "required": True, "section": "📍 Dirección y Contacto"},
+    {"id": "p3_email", "text": "Email:", "type": "text",
+     "required": True, "section": "📍 Dirección y Contacto"},
+
+    # SECTION 3: Employment
+    {"id": "p3_currently_working", "text": "¿Trabajas actualmente con contrato?", "type": "buttons",
+     "options": [("Sí", "yes"), ("No", "no")], "section": "💼 Datos Laborales"},
+    {"id": "p3_employer_name", "text": "Nombre de la empresa:", "type": "text",
+     "condition_field": "p3_currently_working", "condition_values": ["yes"], "section": "💼 Datos Laborales"},
+    {"id": "p3_employer_cif", "text": "CIF de la empresa (si lo sabes):", "type": "text",
+     "condition_field": "p3_currently_working", "condition_values": ["yes"], "section": "💼 Datos Laborales"},
+    {"id": "p3_employer_address", "text": "Dirección de la empresa:", "type": "text",
+     "condition_field": "p3_currently_working", "condition_values": ["yes"], "section": "💼 Datos Laborales"},
+    {"id": "p3_employer_phone", "text": "Teléfono de la empresa:", "type": "text",
+     "condition_field": "p3_currently_working", "condition_values": ["yes"], "section": "💼 Datos Laborales"},
+    {"id": "p3_job_title", "text": "Tu puesto de trabajo:", "type": "text",
+     "condition_field": "p3_currently_working", "condition_values": ["yes"], "section": "💼 Datos Laborales"},
+    {"id": "p3_employer_aware", "text": "¿Tu empleador sabe que estás regularizándote?", "type": "buttons",
+     "options": [("Sí, me apoya", "yes_support"), ("Sí, pero prefiere no involucrarse", "yes_neutral"), ("No sabe", "no")],
+     "condition_field": "p3_currently_working", "condition_values": ["yes"], "section": "💼 Datos Laborales"},
+
+    # SECTION 4: Family in application
+    {"id": "p3_include_family", "text": "¿Vas a incluir familiares en tu solicitud?", "type": "buttons",
+     "options": [("Sí, hijos menores", "children"), ("Sí, pareja", "partner"),
+                 ("Sí, hijos y pareja", "both"), ("No, solo yo", "none")],
+     "section": "👨‍👩‍👧 Familiares en la Solicitud"},
+    {"id": "p3_family_details", "text": "Por cada familiar, indica:\n- Nombre completo\n- Fecha nacimiento\n- Parentesco\n- Nº pasaporte", "type": "text",
+     "condition_field": "p3_include_family", "condition_values": ["children", "partner", "both"],
+     "section": "👨‍👩‍👧 Familiares en la Solicitud"},
+    {"id": "p3_coordinate_applications", "text": "¿Quieres que coordinemos las solicitudes para presentarlas juntas?", "type": "buttons",
+     "options": [("Sí", "yes"), ("No", "no")],
+     "condition_field": "p3_include_family", "condition_values": ["children", "partner", "both"],
+     "section": "👨‍👩‍👧 Familiares en la Solicitud"},
+
+    # SECTION 5: Submission preferences
+    {"id": "p3_priority_submission", "text": "¿Quieres presentación prioritaria (primeros días de abril)?", "type": "buttons",
+     "options": [("Sí, quiero ser de los primeros", "yes"), ("No me importa, cuando esté listo", "no")],
+     "section": "📤 Preferencias de Presentación"},
+    {"id": "p3_anything_else", "text": "¿Hay algo más que debamos saber sobre tu caso?", "type": "text",
+     "section": "📤 Preferencias de Presentación"},
 ]
 
 # =============================================================================
@@ -764,6 +873,7 @@ FAQ_CATEGORIES = {
         "title": "💰 Costos y Pagos",
         "keys": [
             "costo", "por_que_pagar", "solo_sin_abogado", "fases_pago",
+            "por_que_mas_baratos", "por_que_no_hacerlo_solo", "por_que_tantas_preguntas",
         ],
     },
     "cat_dep": {
@@ -1240,6 +1350,54 @@ FAQ = {
         ),
     },
 
+    # === NUESTRO SERVICIO ===
+    "por_que_tantas_preguntas": {
+        "title": "¿Por qué tantas preguntas?",
+        "keywords": ["tantas preguntas", "muchas preguntas", "para qué preguntan", "por qué preguntan tanto"],
+        "text": (
+            "*¿Por qué tantas preguntas?*\n\n"
+            "Cada pregunta tiene un propósito legal concreto:\n\n"
+            "• Las de *Fase 2* nos permiten evaluar la solidez de tu caso "
+            "y generar un informe de auditoría personalizado.\n"
+            "• Las de *Fase 3* van directamente a los formularios oficiales "
+            "que se presentan ante Extranjería.\n\n"
+            "Un expediente incompleto o con errores se deniega. "
+            "Nuestras preguntas evitan que eso pase."
+        ),
+    },
+    "por_que_mas_baratos": {
+        "title": "¿Por qué sois más baratos?",
+        "keywords": ["más baratos", "tan baratos", "más barato", "precio bajo", "sois baratos"],
+        "text": (
+            "*¿Por qué nuestro precio es más bajo que la competencia?*\n\n"
+            "La mayoría de despachos cobra €350-450 porque revisan cada caso "
+            "manualmente, uno por uno. Nosotros usamos *tecnología*:\n\n"
+            "• Bot de intake 24/7 (lo estás usando ahora)\n"
+            "• Validación automática de documentos por IA\n"
+            "• Generación asistida de expedientes\n\n"
+            "Esto nos permite atender más casos con menos horas-hombre, "
+            "y trasladamos ese ahorro al precio.\n\n"
+            "La calidad legal es la misma — cada expediente lo revisa un abogado "
+            "colegiado antes de presentarse."
+        ),
+    },
+    "por_que_no_hacerlo_solo": {
+        "title": "¿Por qué pagar si puedo hacerlo yo?",
+        "keywords": ["hacerlo yo", "hacerlo solo", "por mi cuenta", "no necesito", "gratis el trámite"],
+        "text": (
+            "*¿Por qué pagar si el trámite es \"gratuito\"?*\n\n"
+            "Técnicamente puedes presentar tú solo. Pero considera esto:\n\n"
+            "• En 2005, el *10-20%* de solicitudes fueron denegadas, "
+            "la mayoría por errores evitables.\n"
+            "• Un solo día sin prueba de permanencia puede hacer que te denieguen.\n"
+            "• Los formularios oficiales tienen campos técnicos que confunden.\n"
+            "• Si te deniegan, no puedes volver a presentar — se acabó.\n\n"
+            "Nuestro servicio cuesta €299 (o €254 con prepago). "
+            "Una denegación te cuesta *tu oportunidad de regularizarte*.\n\n"
+            "Fase 1 es gratis — prueba sin compromiso."
+        ),
+    },
+
     # === REFERRAL (kept for /referidos command) ===
     "referidos": {
         "title": "Programa de referidos",
@@ -1302,6 +1460,7 @@ def init_db():
             state TEXT DEFAULT 'new',
             escalation_queue TEXT,
             phase2_answers TEXT,
+            phase3_answers TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
@@ -1309,6 +1468,12 @@ def init_db():
         # Migration: add phase2_answers if missing
         try:
             c.execute("ALTER TABLE users ADD COLUMN phase2_answers TEXT")
+        except Exception:
+            pass
+
+        # Migration: add phase3_answers if missing
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN phase3_answers TEXT")
         except Exception:
             pass
 
@@ -1367,6 +1532,7 @@ def init_db():
             state TEXT DEFAULT 'new',
             escalation_queue TEXT,
             phase2_answers TEXT,
+            phase3_answers TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
@@ -1374,6 +1540,12 @@ def init_db():
         # Migration: add phase2_answers if missing
         try:
             c.execute("ALTER TABLE users ADD COLUMN phase2_answers TEXT")
+        except Exception:
+            pass
+
+        # Migration: add phase3_answers if missing
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN phase3_answers TEXT")
         except Exception:
             pass
 
@@ -3494,6 +3666,33 @@ async def handle_referral_callbacks(update: Update, ctx: ContextTypes.DEFAULT_TY
     return ST_ENTER_REFERRAL_CODE
 
 
+# --- Phase 3 Questionnaire helpers ---
+
+def get_next_p3_question_index(answers: Dict, current_idx: int) -> int:
+    """Get the next Phase 3 question index, skipping conditional questions."""
+    for i in range(current_idx + 1, len(PHASE3_QUESTIONS)):
+        q = PHASE3_QUESTIONS[i]
+        cond_field = q.get("condition_field")
+        if cond_field:
+            cond_values = q.get("condition_values", [])
+            if answers.get(cond_field) not in cond_values:
+                continue
+        return i
+    return -1
+
+
+def build_p3_question_keyboard(question: Dict) -> InlineKeyboardMarkup:
+    """Build keyboard for a Phase 3 question."""
+    if question["type"] == "buttons":
+        btns = []
+        for label, value in question.get("options", []):
+            btns.append([InlineKeyboardButton(label, callback_data=f"p3q_{question['id']}_{value}")])
+        if not question.get("required"):
+            btns.append([InlineKeyboardButton("⏭️ Saltar", callback_data=f"p3q_{question['id']}_skip")])
+        return InlineKeyboardMarkup(btns)
+    return None
+
+
 # --- Country selection ---
 
 async def handle_country(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
@@ -3503,8 +3702,22 @@ async def handle_country(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     country = COUNTRIES.get(code, COUNTRIES["other"])
     update_user(update.effective_user.id, country_code=code)
 
+    # Country-specific antecedentes info (brief upsell)
+    antec_info = COUNTRIES_ANTECEDENTES_INFO.get(code, {})
+    antec_line = ""
+    if antec_info and code != "other":
+        difficulty = antec_info.get("difficulty", "media")
+        time_est = antec_info.get("time", "2-6 semanas")
+        emoji = {"baja": "🟢", "media": "🟡", "alta": "🔴"}.get(difficulty, "🟡")
+        antec_line = (
+            f"\n📜 *Antecedentes penales de {country['name']}:*\n"
+            f"{emoji} Dificultad: {difficulty.capitalize()} | ⏱️ {time_est}\n"
+            f"_Solicítalos YA — por €{PRICING['antecedentes_foreign']} nos encargamos de todo._\n"
+        )
+
     await q.edit_message_text(
-        f"✅ Registrado: {country['flag']} *{country['name']}*\n\n"
+        f"✅ Registrado: {country['flag']} *{country['name']}*\n"
+        f"{antec_line}\n"
         "Continuemos con la verificación de requisitos...\n\n"
         "¿Cómo te llamas? Escribe tu nombre completo:",
         parse_mode=ParseMode.MARKDOWN,
@@ -4089,6 +4302,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ST_MAIN_MENU
 
     if d == "m_pay3":
+        u = get_user(update.effective_user.id)
+        code = u.get("referral_code", "") if u else ""
         text = (
             "*Preparación del expediente — €150*\n\n"
             "Sus documentos han sido verificados. Con este pago, nuestro equipo realizará:\n\n"
@@ -4097,6 +4312,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "• Revisión final por abogado.\n"
             "• Puesto reservado en cola de presentación.\n\n"
         )
+        if code:
+            text += f"💡 _Recuerda: ganas €{PRICING['referral_credit']} por cada amigo que pague. Tu código: `{code}`_\n\n"
         if STRIPE_LINKS["phase3"]:
             text += "Pulse *Pagar con tarjeta* para un pago seguro instantáneo."
         else:
@@ -4113,20 +4330,33 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ST_PAY_PHASE3
 
     if d == "paid3":
-        update_user(update.effective_user.id, state="phase3_pending")
+        tid = update.effective_user.id
+        update_user(tid, state="phase3_pending")
+        u = get_user(tid)
+        code = u.get("referral_code", "") if u else ""
         await notify_admins(ctx,
             f"💳 *Pago Fase 3 pendiente*\n"
             f"Usuario: {user.get('first_name')}\n"
-            f"TID: {update.effective_user.id}\n"
-            f"Aprobar: `/approve3 {update.effective_user.id}`")
+            f"TID: {tid}\n"
+            f"Aprobar: `/approve3 {tid}`")
+        referral_line = f"\n💡 Tu código de referidos: `{code}` — invita amigos y gana €{PRICING['referral_credit']} por cada uno." if code else ""
         await q.edit_message_text(
-            "Hemos registrado su notificación de pago.\n\n"
-            "Lo verificaremos y comenzaremos la preparación de su expediente. "
-            "Recibirá una notificación cuando esté activado.")
-        return ConversationHandler.END
+            "✅ *Pago recibido.*\n\n"
+            "Ahora viene la preparación de tu expediente. Te haremos unas "
+            "preguntas con datos exactos para los formularios oficiales.\n\n"
+            "Lo verificaremos y te avisaremos cuando esté activado."
+            f"{referral_line}",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Comenzar cuestionario", callback_data="start_phase3_questionnaire")],
+                [InlineKeyboardButton("⏰ Más tarde", callback_data="back")],
+            ]))
+        return ST_MAIN_MENU
 
     if d == "m_pay4":
         dl = days_left()
+        u = get_user(update.effective_user.id)
+        code = u.get("referral_code", "") if u else ""
         text = (
             "*Presentación de solicitud — €110*\n\n"
             f"Su expediente está listo. Quedan *{dl} días* hasta el cierre del plazo.\n\n"
@@ -4138,6 +4368,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"📦 *¿Quieres todo incluido?* Por €{PRICING['phase4_bundle']} te gestionamos "
             "también las tasas del gobierno.\n\n"
         )
+        if code:
+            text += f"💡 _Invita amigos con tu código `{code}` y gana €{PRICING['referral_credit']} por cada uno._\n\n"
         if STRIPE_LINKS["phase4"]:
             text += "Pulse *Pagar con tarjeta* para un pago seguro instantáneo."
         else:
@@ -4158,16 +4390,21 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ST_PAY_PHASE4
 
     if d == "paid4":
-        update_user(update.effective_user.id, state="phase4_pending")
+        tid = update.effective_user.id
+        update_user(tid, state="phase4_pending")
+        u = get_user(tid)
+        code = u.get("referral_code", "") if u else ""
         await notify_admins(ctx,
             f"💳 *Pago Fase 4 pendiente*\n"
             f"Usuario: {user.get('first_name')}\n"
-            f"TID: {update.effective_user.id}\n"
-            f"Aprobar: `/approve4 {update.effective_user.id}`")
+            f"TID: {tid}\n"
+            f"Aprobar: `/approve4 {tid}`")
+        referral_line = f"\n\n💡 _Invita amigos con tu código `{code}` — ganan €{PRICING['referral_discount']} de descuento y tú ganas €{PRICING['referral_credit']}._" if code else ""
         await q.edit_message_text(
-            "Hemos registrado su notificación de pago.\n\n"
+            "✅ *Pago recibido.*\n\n"
             "Lo verificaremos y procederemos a presentar su solicitud. "
-            "Recibirá una confirmación con el número de registro.")
+            f"Recibirá una confirmación con el número de registro.{referral_line}",
+            parse_mode=ParseMode.MARKDOWN)
         return ConversationHandler.END
 
     if d == "show_bizum":
@@ -4485,6 +4722,28 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                 ]))
             return ST_PHASE2_TEXT_ANSWER
 
+    # --- Phase 3 questionnaire start ---
+    if d == "start_phase3_questionnaire":
+        ctx.user_data["phase3_answers"] = {}
+        ctx.user_data["phase3_q_idx"] = 0
+        # Show intro first, then first question
+        q_data = PHASE3_QUESTIONS[0]
+        section = q_data.get("section", "")
+        text = f"{PHASE3_INTRO}\n\n📋 *{section}*\n\n{q_data['text']}"
+        if q_data["type"] == "buttons":
+            await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
+                reply_markup=build_p3_question_keyboard(q_data))
+            return ST_PHASE3_QUESTIONNAIRE
+        else:
+            skip_btn = []
+            if not q_data.get("required"):
+                skip_btn = [[InlineKeyboardButton("⏭️ Saltar", callback_data=f"p3q_{q_data['id']}_skip")]]
+            await q.edit_message_text(
+                text + "\n\n_Escribe tu respuesta:_",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup(skip_btn) if skip_btn else None)
+            return ST_PHASE3_TEXT_ANSWER
+
     # --- Phase 2 pitch (after 3+ docs) ---
     if d == "request_phase2":
         dc = get_doc_count(update.effective_user.id)
@@ -4665,6 +4924,129 @@ async def handle_phase2_text_answer(update: Update, ctx: ContextTypes.DEFAULT_TY
                 [InlineKeyboardButton("⏭️ Saltar", callback_data=f"p2q_{q_data['id']}_skip")],
             ]))
         return ST_PHASE2_TEXT_ANSWER
+
+
+# --- Phase 3 Questionnaire ---
+
+async def handle_phase3_questionnaire(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle button answers to Phase 3 questionnaire."""
+    q = update.callback_query
+    await q.answer()
+    d = q.data
+
+    answers = ctx.user_data.get("phase3_answers", {})
+    current_idx = ctx.user_data.get("phase3_q_idx", 0)
+
+    # Parse callback: p3q_{question_id}_{value}
+    if d.startswith("p3q_"):
+        parts = d[4:].rsplit("_", 1)
+        if len(parts) == 2:
+            q_id, value = parts
+            if value != "skip":
+                answers[q_id] = value
+            ctx.user_data["phase3_answers"] = answers
+
+    # Get next question
+    next_idx = get_next_p3_question_index(answers, current_idx)
+
+    if next_idx < 0:
+        # Questionnaire complete — save and notify
+        tid = update.effective_user.id
+        update_user(tid, phase3_answers=json.dumps(answers))
+
+        await q.edit_message_text(
+            PHASE3_COMPLETION,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("← Menú principal", callback_data="back")],
+            ]))
+
+        user = get_user(tid)
+        name = user.get("full_name") or user.get("first_name", "?") if user else "?"
+        await notify_admins(ctx,
+            f"📝 *Cuestionario Fase 3 completado*\n"
+            f"Usuario: {name} ({tid})\n"
+            f"Respuestas: {len(answers)}\n"
+            f"Expediente en preparación.")
+        return ST_MAIN_MENU
+
+    # Show next question
+    ctx.user_data["phase3_q_idx"] = next_idx
+    q_data = PHASE3_QUESTIONS[next_idx]
+    section = q_data.get("section", "")
+    progress = f"({next_idx + 1}/{len(PHASE3_QUESTIONS)})"
+    text = f"📋 *{section}* {progress}\n\n{q_data['text']}"
+
+    if q_data["type"] == "buttons":
+        await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=build_p3_question_keyboard(q_data))
+        return ST_PHASE3_QUESTIONNAIRE
+    else:
+        skip_btn = []
+        if not q_data.get("required"):
+            skip_btn = [[InlineKeyboardButton("⏭️ Saltar", callback_data=f"p3q_{q_data['id']}_skip")]]
+        await q.edit_message_text(
+            text + "\n\n_Escribe tu respuesta:_",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(skip_btn) if skip_btn else None)
+        return ST_PHASE3_TEXT_ANSWER
+
+
+async def handle_phase3_text_answer(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle free-text answers to Phase 3 questionnaire."""
+    text = update.message.text or ""
+    answers = ctx.user_data.get("phase3_answers", {})
+    current_idx = ctx.user_data.get("phase3_q_idx", 0)
+
+    if current_idx < len(PHASE3_QUESTIONS):
+        q_data = PHASE3_QUESTIONS[current_idx]
+        answers[q_data["id"]] = text
+        ctx.user_data["phase3_answers"] = answers
+
+    # Get next question
+    next_idx = get_next_p3_question_index(answers, current_idx)
+
+    if next_idx < 0:
+        # Questionnaire complete
+        tid = update.effective_user.id
+        update_user(tid, phase3_answers=json.dumps(answers))
+
+        await update.message.reply_text(
+            PHASE3_COMPLETION,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("← Menú principal", callback_data="back")],
+            ]))
+
+        user = get_user(tid)
+        name = user.get("full_name") or user.get("first_name", "?") if user else "?"
+        await notify_admins(ctx,
+            f"📝 *Cuestionario Fase 3 completado*\n"
+            f"Usuario: {name} ({tid})\n"
+            f"Respuestas: {len(answers)}\n"
+            f"Expediente en preparación.")
+        return ST_MAIN_MENU
+
+    # Show next question
+    ctx.user_data["phase3_q_idx"] = next_idx
+    q_data = PHASE3_QUESTIONS[next_idx]
+    section = q_data.get("section", "")
+    progress = f"({next_idx + 1}/{len(PHASE3_QUESTIONS)})"
+    text_msg = f"📋 *{section}* {progress}\n\n{q_data['text']}"
+
+    if q_data["type"] == "buttons":
+        await update.message.reply_text(text_msg, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=build_p3_question_keyboard(q_data))
+        return ST_PHASE3_QUESTIONNAIRE
+    else:
+        skip_btn = []
+        if not q_data.get("required"):
+            skip_btn = [[InlineKeyboardButton("⏭️ Saltar", callback_data=f"p3q_{q_data['id']}_skip")]]
+        await update.message.reply_text(
+            text_msg + "\n\n_Escribe tu respuesta:_",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(skip_btn) if skip_btn else None)
+        return ST_PHASE3_TEXT_ANSWER
 
 
 # --- FAQ ---
@@ -6324,6 +6706,15 @@ def main():
                 CallbackQueryHandler(handle_phase2_questionnaire, pattern="^p2q_"),
                 CallbackQueryHandler(handle_menu),
             ],
+            ST_PHASE3_QUESTIONNAIRE: [
+                CallbackQueryHandler(handle_phase3_questionnaire, pattern="^p3q_"),
+                CallbackQueryHandler(handle_menu),
+            ],
+            ST_PHASE3_TEXT_ANSWER: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phase3_text_answer),
+                CallbackQueryHandler(handle_phase3_questionnaire, pattern="^p3q_"),
+                CallbackQueryHandler(handle_menu),
+            ],
         },
         fallbacks=[
             CommandHandler("start", cmd_start),
@@ -6380,7 +6771,7 @@ def main():
         job_queue.run_repeating(send_reminder_1week, interval=timedelta(hours=6), first=timedelta(minutes=15))
         logger.info("Re-engagement reminders scheduled (24h, 72h, 1week)")
 
-    logger.info("PH-Bot v5.8.0 starting")
+    logger.info("PH-Bot v5.9.0 starting")
     logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
     logger.info(f"Payment: FREE > €39 > €150 > €110 | Days left: {days_left()}")
     logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
