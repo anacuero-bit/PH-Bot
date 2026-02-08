@@ -1537,15 +1537,19 @@ def init_db():
 
         # Migration: add phase2_answers if missing
         try:
+            c.execute("SAVEPOINT sp_phase2_answers")
             c.execute("ALTER TABLE users ADD COLUMN phase2_answers TEXT")
+            c.execute("RELEASE SAVEPOINT sp_phase2_answers")
         except Exception:
-            pass
+            c.execute("ROLLBACK TO SAVEPOINT sp_phase2_answers")
 
         # Migration: add phase3_answers if missing
         try:
+            c.execute("SAVEPOINT sp_phase3_answers")
             c.execute("ALTER TABLE users ADD COLUMN phase3_answers TEXT")
+            c.execute("RELEASE SAVEPOINT sp_phase3_answers")
         except Exception:
-            pass
+            c.execute("ROLLBACK TO SAVEPOINT sp_phase3_answers")
 
         c.execute("""CREATE TABLE IF NOT EXISTS cases (
             id SERIAL PRIMARY KEY,
