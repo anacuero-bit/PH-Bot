@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v5.6.0 — Client Intake & Case Management
+PH-Bot v5.7.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
 Updated:    2026-02-08
@@ -242,6 +242,14 @@ DEADLINE = datetime(2026, 6, 30, 23, 59, 59)
 DB_PATH = "tuspapeles.db"
 MIN_DOCS_FOR_PHASE2 = 3
 
+# =============================================================================
+# CRITICAL DATES — USE THESE CONSTANTS EVERYWHERE
+# =============================================================================
+CUTOFF_DATE = "31 de diciembre de 2025"
+CUTOFF_DATE_SHORT = "31/12/2025"
+APPLICATION_START = "1 de abril de 2026"
+APPLICATION_END = "30 de junio de 2026"
+
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     level=logging.INFO,
@@ -360,7 +368,7 @@ DOC_TYPES = {
     "empadronamiento": {
         "name": "Empadronamiento / Certificado de residencia",
         "icon": "📍",
-        "required": True,
+        "required": False,
         "ocr_keywords": ["PADRÓN", "EMPADRONAMIENTO", "AYUNTAMIENTO", "CERTIFICADO", "MUNICIPAL"],
         "validity_check": "less_than_3_months",
         "tip": "Solícitelo en su ayuntamiento. Algunos permiten hacerlo online.",
@@ -2419,36 +2427,29 @@ def get_country_checklist(country_code: str) -> str:
 
     return (
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "📌 OBLIGATORIOS (todos necesarios)\n"
+        "📌 OBLIGATORIOS\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "1️⃣ *Pasaporte completo*\n"
+        "1️⃣ *Pasaporte vigente*\n"
         "   Todas las páginas, incluyendo vacías.\n\n"
         "2️⃣ *Antecedentes penales - España*\n"
-        "   Certificado del Ministerio de Justicia.\n\n"
+        "   Del Ministerio de Justicia.\n\n"
         f"3️⃣ *Antecedentes penales - {name}*\n"
-        "   Apostillado y traducido si no está en español.\n"
-        "   Usa /antecedentes para más información.\n\n"
-        "4️⃣ *Empadronamiento*\n"
-        "   Certificado de tu ayuntamiento.\n\n"
+        "   Apostillado y traducido si necesario.\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "🏠 PRUEBA DE RESIDENCIA (elige UNA opción)\n"
+        "📍 PRUEBA DE PRESENCIA EN ESPAÑA\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Debes demostrar presencia en España antes del 10 noviembre 2024.\n\n"
-        "*Opción A:* Empadronamiento histórico\n"
-        "*Opción B:* Contrato de trabajo anterior a nov 2024\n"
-        "*Opción C:* Historial médico (cita o informe)\n"
-        "*Opción D:* Envíos de dinero (Western Union, Ria, etc.)\n"
-        "*Opción E:* Otros (facturas, extractos bancarios, billetes)\n\n"
+        f"Debes demostrar que estabas aquí antes del *{CUTOFF_DATE}*.\n\n"
+        "*NO necesitas empadronamiento.* Sirve CUALQUIER documento:\n"
+        "facturas, médico, banco, transporte, trabajo, móvil...\n\n"
+        "👉 Usa el botón de abajo para ver la lista de 40+ documentos válidos.\n\n"
         "💡 _Cuantos más documentos de prueba, mejor._\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "📎 OPCIONALES (refuerzan tu caso)\n"
+        "📎 RECOMENDADOS (refuerzan tu caso)\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "• Contrato de trabajo actual\n"
         "• Nóminas recientes\n"
-        "• Vida laboral\n"
-        "• Certificado de estudios en España\n"
-        "• Certificado de idioma español\n"
-        "• Cartas de apoyo de empleador/vecinos"
+        "• Certificados de estudios\n"
+        "• Cartas de apoyo"
     )
 
 
@@ -2623,6 +2624,100 @@ ANTECEDENTES_HELP_TEXT = (
     "⏱️ Tiempo: 2-4 semanas (varía por país)\n\n"
     "⚠️ _Nota: Algunos países tienen procesos muy complejos o lentos. "
     "Te informaremos antes de empezar si tu país presenta dificultades especiales._"
+)
+
+
+FAQ_PROOF_DOCUMENTS_FULL = (
+    "📄 *Documentos que sirven como prueba de presencia*\n\n"
+    "El decreto acepta CUALQUIER documento público o privado.\n"
+    "*NO necesitas empadronamiento obligatoriamente.*\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "🏠 VIVIENDA\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "• Empadronamiento (NO obligatorio)\n"
+    "• Contrato de alquiler\n"
+    "• Recibos de alquiler\n"
+    "• Facturas de luz (Endesa, Iberdrola, Naturgy)\n"
+    "• Facturas de agua\n"
+    "• Facturas de gas\n"
+    "• Facturas de internet/fibra\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "🏥 MÉDICOS\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "• Tarjeta sanitaria (SIP, TSI)\n"
+    "• Citas médicas\n"
+    "• Recetas de farmacia\n"
+    "• Informes médicos\n"
+    "• Urgencias\n"
+    "• Vacunaciones (COVID, gripe, etc.)\n"
+    "• Visitas al dentista\n"
+    "• Pruebas médicas\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "🏦 BANCARIOS Y ENVÍOS DE DINERO\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "• Extractos bancarios\n"
+    "• Tarjetas fintech: Revolut, N26, Wise, Bnext\n"
+    "• Recibos de Western Union\n"
+    "• Recibos de Ria Money Transfer\n"
+    "• Recibos de MoneyGram\n"
+    "• Recibos de Small World\n"
+    "• Movimientos de Bizum\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "🚌 TRANSPORTE\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "• Abono transporte (con recargas)\n"
+    "• Billetes de Renfe / Cercanías\n"
+    "• Billetes de autobús\n"
+    "• Recibos de Cabify, Uber, Bolt\n"
+    "• BiciMad, Bicing\n"
+    "• Recibos de parking\n"
+    "• Multas de tráfico (sí, también sirven)\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "📚 EDUCACIÓN Y FAMILIA\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "• Matrícula escolar (tuya o de tus hijos)\n"
+    "• Boletines de notas\n"
+    "• Cursos de español\n"
+    "• Cursos de formación profesional\n"
+    "• Guardería\n"
+    "• Actividades extraescolares\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "💼 TRABAJO\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "• Nóminas\n"
+    "• Contratos de trabajo\n"
+    "• Vida laboral\n"
+    "• Registros de Glovo, Uber Eats, Deliveroo\n"
+    "• Facturas como autónomo\n"
+    "• Carta de empleador\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "📱 VIDA DIARIA\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "• Facturas de móvil (Movistar, Vodafone, Orange, Digi)\n"
+    "• Recargas de móvil prepago\n"
+    "• Abono de gimnasio\n"
+    "• Carnet de biblioteca\n"
+    "• Paquetes o correo a tu nombre\n"
+    "• Compras online con dirección española\n"
+    "• Entradas a cine, conciertos, eventos\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "⛪ COMUNIDAD Y MASCOTAS\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "• Participación en iglesia/parroquia/mezquita\n"
+    "• Voluntariado en ONGs\n"
+    "• Cartas de Cruz Roja, Cáritas\n"
+    "• Visitas al veterinario\n"
+    "• Cartilla de vacunación de mascota\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "💡 CONSEJOS IMPORTANTES\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "✅ Combina 3-5 documentos de DIFERENTES categorías\n"
+    f"✅ Documentos con fechas antes del {CUTOFF_DATE}\n"
+    "✅ Mejor si cubren varios meses (demuestra continuidad)\n"
+    "✅ Más documentos = más fuerte tu caso\n\n"
+    "❌ NO necesitas empadronamiento obligatoriamente\n"
+    "❌ NO necesitas contrato de trabajo\n"
+    "❌ NO necesitas TODOS estos documentos"
 )
 
 
@@ -3168,11 +3263,16 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         faq = FAQ.get(key)
         if faq:
             text = faq["text"].replace("{days}", str(days_left()))
+            # Document-related FAQs get extra button to see full 40+ proof list
+            proof_keys = {"documentos_necesarios", "prueba_llegada", "prueba_permanencia",
+                          "sin_empadronamiento", "documentos_otro_nombre"}
+            btns = []
+            if key in proof_keys:
+                btns.append([InlineKeyboardButton("📋 Ver 40+ documentos válidos", callback_data="proof_docs_full")])
+            btns.append([InlineKeyboardButton("📋 Todas las categorías", callback_data="m_faq")])
+            btns.append([InlineKeyboardButton("← Menú principal", callback_data="back")])
             await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📋 Todas las categorías", callback_data="m_faq")],
-                    [InlineKeyboardButton("← Menú principal", callback_data="back")],
-                ]))
+                reply_markup=InlineKeyboardMarkup(btns))
             return ST_FAQ_ITEM
         return ST_MAIN_MENU
 
@@ -3200,6 +3300,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📄 Subir documentos", callback_data="m_upload")],
+                [InlineKeyboardButton("📋 Ver 40+ documentos válidos", callback_data="proof_docs_full")],
                 [InlineKeyboardButton("🌍 Ayuda con antecedentes", callback_data="antecedentes_help")],
                 [InlineKeyboardButton("← Volver al menú", callback_data="back")],
             ]))
@@ -3576,6 +3677,17 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             reply_markup=InlineKeyboardMarkup(btns))
         return ST_MAIN_MENU
 
+    if d == "proof_docs_full":
+        await q.edit_message_text(
+            FAQ_PROOF_DOCUMENTS_FULL,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📄 Subir documentos", callback_data="m_upload")],
+                [InlineKeyboardButton("📋 Volver a checklist", callback_data="m_checklist")],
+                [InlineKeyboardButton("← Menú", callback_data="back")],
+            ]))
+        return ST_MAIN_MENU
+
     if d == "antecedentes_help":
         await q.edit_message_text(
             ANTECEDENTES_HELP_TEXT,
@@ -3740,7 +3852,11 @@ async def handle_faq_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int
         if faq:
             text = faq["text"].replace("{days}", str(days_left()))
             # Build back buttons — include back-to-category if available
+            proof_keys = {"documentos_necesarios", "prueba_llegada", "prueba_permanencia",
+                          "sin_empadronamiento", "documentos_otro_nombre"}
             btns = []
+            if key in proof_keys:
+                btns.append([InlineKeyboardButton("📋 Ver 40+ documentos válidos", callback_data="proof_docs_full")])
             cat_key = ctx.user_data.get("faq_cat")
             if cat_key and cat_key in FAQ_CATEGORIES:
                 btns.append([InlineKeyboardButton(
@@ -5412,7 +5528,7 @@ def main():
         job_queue.run_repeating(send_reminder_1week, interval=timedelta(hours=6), first=timedelta(minutes=15))
         logger.info("Re-engagement reminders scheduled (24h, 72h, 1week)")
 
-    logger.info("PH-Bot v5.6.0 starting")
+    logger.info("PH-Bot v5.7.0 starting")
     logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
     logger.info(f"Payment: FREE > €39 > €150 > €110 | Days left: {days_left()}")
     logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
