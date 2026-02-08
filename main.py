@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v5.4.0 — Client Intake & Case Management
+PH-Bot v5.5.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
 Updated:    2026-02-08
@@ -209,6 +209,9 @@ BANK_IBAN = os.environ.get("BANK_IBAN", "ES00 0000 0000 0000 0000 0000")
 STRIPE_PHASE2_LINK = os.environ.get("STRIPE_PHASE2_LINK", "")  # Stripe payment link for €39
 STRIPE_PHASE3_LINK = os.environ.get("STRIPE_PHASE3_LINK", "")  # Stripe payment link for €150
 STRIPE_PHASE4_LINK = os.environ.get("STRIPE_PHASE4_LINK", "")  # Stripe payment link for €110
+STRIPE_PREPAY_LINK = os.environ.get("STRIPE_PREPAY_LINK", "")  # Stripe payment link for €254 full prepay
+STRIPE_ANTECEDENTES_LINK = os.environ.get("STRIPE_ANTECEDENTES_LINK", "")  # Stripe for €49 antecedentes
+STRIPE_GOVT_FEES_LINK = os.environ.get("STRIPE_GOVT_FEES_LINK", "")  # Stripe for €29 govt fees
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")  # Claude API for document analysis
 # Debug: log API key availability at startup (never log the key itself)
 logging.getLogger("ph-bot").info(
@@ -255,6 +258,10 @@ PRICING = {
     "phase3": 150,     # Docs verified — processing
     "phase4": 110,     # Filing window opens
     "total_service": 299,
+    "prepay": 254,     # 15% discount for full upfront payment
+    "prepay_savings": 45,
+    "antecedentes_service": 49,   # We handle certificate + apostille + translation
+    "govt_fees_service": 29,      # We handle 790 tax form payments
     "gov_fee": 38.28,
     "tie_card": 16,
 }
@@ -1273,63 +1280,59 @@ FAQ = {
         "text": (
             "💰 *¿Cuánto Cuesta la Regularización?*\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "🏛️ TASAS DEL GOBIERNO\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "El gobierno español cobra tasas administrativas:\n\n"
-            "• *Tasa 790-052* (tramitación): ~€16-20\n"
-            "  Para procesar tu solicitud de residencia\n\n"
-            "• *Tasa 790-012* (TIE): ~€16-21\n"
-            "  Para expedir tu Tarjeta de Identidad de Extranjero\n\n"
-            "• Certificado antecedentes España: ~€3.86\n\n"
-            "*Total tasas gobierno: aproximadamente €40-50*\n\n"
-            "Estas tasas se pagan directamente al gobierno cuando presentes tu solicitud. "
-            "Nosotros te guiamos en cómo y cuándo pagarlas.\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
             "📋 NUESTRO SERVICIO\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Servicio completo de gestión: *€299 en fases*\n\n"
+            "*Pago por fases:* €299 total\n"
+            "*Pago único:* €254 (ahorras €45) ⭐\n\n"
             "📌 *Fase 1 — GRATIS*\n"
             "• Verificación de elegibilidad\n"
-            "• Subida de documentos\n"
-            "• Revisión inicial\n\n"
+            "• Subida de documentos\n\n"
             "📌 *Fase 2 — €39*\n"
-            "• Revisión legal completa por abogado\n"
-            "• Verificación de cada documento\n"
-            "• Identificación de documentos faltantes\n"
-            "• Recomendaciones personalizadas\n\n"
+            "• Revisión legal completa\n"
+            "• Verificación de documentos\n\n"
             "📌 *Fase 3 — €150*\n"
-            "• Preparación profesional del expediente\n"
-            "• Redacción de escritos legales\n"
-            "• Organización según requisitos oficiales\n"
-            "• Revisión final pre-presentación\n\n"
+            "• Preparación del expediente\n"
+            "• Redacción de escritos legales\n\n"
             "📌 *Fase 4 — €110*\n"
-            "• Presentación telemática de tu solicitud\n"
-            "• Seguimiento del expediente\n"
-            "• Notificación de resolución\n"
-            "• Asistencia post-aprobación\n\n"
+            "• Presentación de solicitud\n"
+            "• Seguimiento hasta resolución\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "🛡️ ¿POR QUÉ EN FASES?\n"
+            "💳 OPCIONES DE PAGO\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Dividimos el pago en fases para tu protección:\n\n"
-            "✅ Solo pagas por lo que necesitas\n"
-            "✅ Puedes pausar en cualquier momento\n"
-            "✅ Sin compromisos de pago total\n"
-            "✅ Transparencia total en cada paso\n\n"
-            "No pedimos el pago completo por adelantado porque queremos que "
-            "confíes en nosotros paso a paso.\n\n"
+            "*⭐ Pago único: €254*\n"
+            "Ahorras €45 (15% descuento)\n\n"
+            "*Por fases: €299*\n"
+            "Paga cada fase cuando estés listo.\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "🎁 DESCUENTOS\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "• €25 si usas el código de un amigo\n"
-            "• Hasta €299 en créditos por referir amigos\n\n"
+            "• €25 con código de amigo\n"
+            "• Hasta €299 por referir amigos\n"
+            "• 15% si pagas todo de una vez\n\n"
+            "_Los descuentos son acumulables._\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "📦 SERVICIOS ADICIONALES\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "*Antecedentes penales: +€49*\n"
+            "Solicitud + apostilla + traducción\n\n"
+            "*Gestión tasas gobierno: +€29*\n"
+            "Pagamos las tasas 790 por ti\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "🏛️ TASAS DEL GOBIERNO\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "El gobierno cobra tasas adicionales:\n\n"
+            "• Tasa 790-052: ~€16-20\n"
+            "• Tasa 790-012 (TIE): ~€16-21\n"
+            "• Antecedentes España: ~€3.86\n\n"
+            "*Total gobierno: ~€40-50*\n\n"
+            "Estas se pagan directamente al gobierno.\n"
+            "💡 Por €29, las gestionamos por ti.\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "⚠️ IMPORTANTE\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "En 2005, el *10-20% de solicitudes fueron DENEGADAS*, muchas por errores "
-            "evitables en la documentación. Un expediente mal preparado puede costarte "
-            "esta oportunidad única.\n\n"
-            "Nuestro equipo de abogados especializados revisa cada detalle para "
-            "maximizar tus posibilidades de aprobación."
+            "En 2005, el *10-20% de solicitudes fueron DENEGADAS* por errores "
+            "en documentación.\n\n"
+            "Nuestros abogados revisan cada detalle."
         ),
     },
     "por_que_pagar": {
@@ -2906,6 +2909,40 @@ def _payment_buttons(paid_callback: str, stripe_link: str = "") -> InlineKeyboar
     return InlineKeyboardMarkup(btns)
 
 
+def eligible_payment_kb(has_referral_discount: bool = False) -> InlineKeyboardMarkup:
+    """Payment options shown right after eligibility check passes."""
+    prepay_price = PRICING["prepay"] - REFERRAL_FRIEND_DISCOUNT if has_referral_discount else PRICING["prepay"]
+    phase2_price = PRICING["phase2"] - REFERRAL_FRIEND_DISCOUNT if has_referral_discount else PRICING["phase2"]
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            f"⭐ Pagar TODO — €{prepay_price} (ahorra €{PRICING['prepay_savings']})",
+            callback_data="pay_full")],
+        [InlineKeyboardButton(
+            f"💳 Pagar Fase 2 — €{phase2_price}",
+            callback_data="m_pay2")],
+        [InlineKeyboardButton(
+            "📄 Empezar gratis (subir docs)",
+            callback_data="m_upload")],
+        [InlineKeyboardButton("❓ Preguntas frecuentes", callback_data="m_faq")],
+    ])
+
+
+def antecedentes_service_kb() -> InlineKeyboardMarkup:
+    """Buttons for antecedentes service offer."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"💼 Contratar servicio — €{PRICING['antecedentes_service']}", callback_data="buy_antecedentes")],
+        [InlineKeyboardButton("📋 Lo hago yo mismo", callback_data="back")],
+    ])
+
+
+def govt_fees_service_kb() -> InlineKeyboardMarkup:
+    """Buttons for government fees service offer."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"💼 Añadir servicio — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
+        [InlineKeyboardButton("📋 Las pago yo mismo", callback_data="back")],
+    ])
+
+
 def _user_doc_summary(tid: int) -> str:
     """Build a summary of user's uploaded docs for conversion messaging."""
     docs = get_user_docs(tid)
@@ -3309,26 +3346,29 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         code = user['referral_code']
 
+    has_referral = user.get("used_referral_code") is not None
+    prepay_price = PRICING["prepay"] - REFERRAL_FRIEND_DISCOUNT if has_referral else PRICING["prepay"]
+
     await q.edit_message_text(
-        f"*{name}, cumple los requisitos básicos para la regularización.*\n\n"
-        f"Le hemos asignado el número de expediente *{case['case_number']}*.\n\n"
-        "Este decreto NO requiere contrato de trabajo. "
-        "Se presume vulnerabilidad por estar en situación irregular.\n\n"
-        "En el proceso de 2005, se aprobaron el 80-90% de solicitudes. "
-        "Este decreto es aún más flexible.\n\n"
-        f"Plazo: 1 abril — 30 junio 2026 ({days_left()} días).\n"
-        "Presentación: 100% online.\n\n"
-        "El siguiente paso es preparar su documentación. "
-        "Puede empezar ahora mismo — es completamente gratuito.\n\n"
-        f"💡 *Tu código personal:* `{code}`\n"
-        "_Guárdalo — más info en \"Invitar amigos\" del menú._",
+        f"✅ *¡Buenas noticias, {name}!*\n\n"
+        "Cumples los requisitos básicos para la regularización 2026.\n\n"
+        f"Expediente: *{case['case_number']}*\n"
+        f"Plazo: 1 abril — 30 junio 2026 ({days_left()} días)\n\n"
+        "Este decreto NO requiere contrato de trabajo.\n"
+        "En 2005 se aprobaron el 80-90% de solicitudes. Este es aún más flexible.\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "💳 OPCIONES PARA CONTINUAR\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"*⭐ Pago único — €{prepay_price}* (ahorras €{PRICING['prepay_savings']})\n"
+        "Todo incluido hasta tu resolución.\n\n"
+        f"*💳 Por fases — €{PRICING['phase2']} ahora*\n"
+        f"Empieza con Fase 2, paga el resto después.\nTotal por fases: €{PRICING['total_service']}\n\n"
+        "*📄 Empezar gratis*\n"
+        "Sube documentos primero (Fase 1 gratis).\n\n"
+        f"💡 Tu código: `{code}`\n"
+        "_Más info en \"Invitar amigos\" del menú._",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Ver qué documentos necesito", callback_data="fq_documentos_necesarios")],
-            [InlineKeyboardButton("Ver precios del servicio", callback_data="m_price")],
-            [InlineKeyboardButton("Empezar a subir documentos", callback_data="m_upload")],
-            [InlineKeyboardButton("Tengo más preguntas", callback_data="m_faq")],
-        ]),
+        reply_markup=eligible_payment_kb(has_referral),
     )
     return ST_ELIGIBLE
 
@@ -3533,6 +3573,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "m_price":
         await q.edit_message_text(FAQ["costo"]["text"], parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"⭐ Pagar TODO — €{PRICING['prepay']}", callback_data="pay_full")],
+                [InlineKeyboardButton(f"💳 Pagar Fase 2 — €{PRICING['phase2']}", callback_data="m_pay2")],
+                [InlineKeyboardButton("📦 Ver servicios adicionales", callback_data="extra_services")],
                 [InlineKeyboardButton("← Volver", callback_data="back")],
             ]))
         return ST_MAIN_MENU
@@ -3796,6 +3839,93 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                 [InlineKeyboardButton("← Volver", callback_data="back")],
             ]))
         return ST_PAY_PHASE2
+
+    if d == "pay_full":
+        tid = update.effective_user.id
+        u = get_user(tid)
+        has_referral = u.get("used_referral_code") is not None
+        price = PRICING["prepay"] - REFERRAL_FRIEND_DISCOUNT if has_referral else PRICING["prepay"]
+        referral_line = "\n🎁 _Descuento de €25 aplicado por usar código de amigo._\n" if has_referral else ""
+        btns = []
+        if STRIPE_PREPAY_LINK:
+            btns.append([InlineKeyboardButton(f"💳 Pagar €{price}", url=STRIPE_PREPAY_LINK)])
+        btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
+        btns.append([InlineKeyboardButton("Tengo dudas", callback_data="m_contact")])
+        btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
+        await q.edit_message_text(
+            f"💳 *Pago Único — €{price}*\n\n"
+            "Incluye todas las fases hasta tu resolución:\n"
+            "✅ Revisión legal completa\n"
+            "✅ Preparación del expediente\n"
+            "✅ Presentación de solicitud\n"
+            "✅ Seguimiento hasta resolución\n"
+            f"{referral_line}\n"
+            "Haz clic en el botón para pagar de forma segura:",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(btns))
+        return ST_MAIN_MENU
+
+    if d == "buy_antecedentes":
+        tid = update.effective_user.id
+        btns = []
+        if STRIPE_ANTECEDENTES_LINK:
+            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['antecedentes_service']}", url=STRIPE_ANTECEDENTES_LINK)])
+        btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
+        btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
+        await q.edit_message_text(
+            f"💼 *Servicio de Antecedentes Penales — €{PRICING['antecedentes_service']}*\n\n"
+            "Nos encargamos de todo:\n\n"
+            "✅ Solicitar el certificado en tu país de origen\n"
+            "✅ Gestionar la apostilla o legalización\n"
+            "✅ Traducción jurada al español (si necesario)\n"
+            "✅ Entrega en formato digital, listo para presentar\n\n"
+            "⏱️ Tiempo estimado: 2-4 semanas (varía por país)\n\n"
+            "Necesitaremos algunos datos adicionales después del pago.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(btns))
+        return ST_MAIN_MENU
+
+    if d == "buy_govt_fees":
+        tid = update.effective_user.id
+        btns = []
+        if STRIPE_GOVT_FEES_LINK:
+            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['govt_fees_service']}", url=STRIPE_GOVT_FEES_LINK)])
+        btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
+        btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
+        await q.edit_message_text(
+            f"🏛️ *Gestión de Tasas Gubernamentales — €{PRICING['govt_fees_service']}*\n\n"
+            "Nos encargamos de:\n\n"
+            "✅ Pagar la Tasa 790-052 (tramitación)\n"
+            "✅ Pagar la Tasa 790-012 (TIE)\n"
+            "✅ Enviarte los justificantes de pago\n"
+            "✅ Incluirlos en tu expediente\n\n"
+            "💰 Las tasas en sí (~€40-50) las pagas aparte.\n"
+            f"Nosotros cobramos €{PRICING['govt_fees_service']} por el servicio de gestión.\n\n"
+            "_Así no tienes que preocuparte de formularios ni plazos._",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(btns))
+        return ST_MAIN_MENU
+
+    if d == "extra_services":
+        await q.edit_message_text(
+            "📦 *Servicios Adicionales*\n\n"
+            "Estos servicios son opcionales. Te ayudan a simplificar el proceso.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"🌍 *Antecedentes Penales — €{PRICING['antecedentes_service']}*\n"
+            "Nos encargamos de solicitar, apostillar y traducir tu certificado "
+            "de antecedentes del país de origen.\n\n"
+            f"🏛️ *Gestión de Tasas — €{PRICING['govt_fees_service']}*\n"
+            "Pagamos y gestionamos las tasas gubernamentales "
+            "(790-052, 790-012) por ti.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "_Puedes añadir estos servicios en cualquier momento._",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"🌍 Antecedentes — €{PRICING['antecedentes_service']}", callback_data="buy_antecedentes")],
+                [InlineKeyboardButton(f"🏛️ Tasas gobierno — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
+                [InlineKeyboardButton("← Volver", callback_data="back")],
+            ]))
+        return ST_MAIN_MENU
 
     if d == "back":
         return await show_main_menu(update, ctx)
@@ -5252,17 +5382,21 @@ async def cmd_antecedentes(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
     await update.message.reply_text(
         info_text + "\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "📌 *IMPORTANTE*\n"
+        "💼 ¿PREFIERES QUE LO HAGAMOS NOSOTROS?\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Por *€{PRICING['antecedentes_service']}* nos encargamos de todo:\n"
+        "• Solicitar tu certificado de antecedentes\n"
+        "• Gestionar la apostilla/legalización\n"
+        "• Traducción jurada si es necesario\n"
+        "• Entregártelo listo para presentar\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "• El certificado debe tener menos de 3 meses de antigüedad\n"
+        "📌 RECUERDA\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "• Certificado debe tener menos de 3 meses\n"
         "• Debe estar apostillado o legalizado\n"
-        "• Si está en otro idioma, necesita traducción jurada en España\n\n"
-        "¿Tienes dudas? Escríbenos y te ayudamos.",
+        "• Si no está en español: traducción jurada",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 Consultar con abogado", callback_data="m_contact")],
-            [InlineKeyboardButton("← Menú", callback_data="back")],
-        ]),
+        reply_markup=antecedentes_service_kb(),
     )
     return ST_MAIN_MENU
 
