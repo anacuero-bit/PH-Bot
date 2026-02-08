@@ -1,13 +1,30 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v5.7.0 — Client Intake & Case Management
+PH-Bot v5.8.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
 Updated:    2026-02-08
 
 CHANGELOG:
 ----------
+v5.8.0 (2026-02-08)
+  - NEW: Phase 2 deep questionnaire (20 questions across 5 sections)
+  - NEW: Personalized audit report generator (generate_phase2_report)
+  - NEW: Competitive pricing messaging (PRICING_EXPLANATION)
+  - NEW: Spain antecedentes upsell (€15 with DIY instructions)
+  - NEW: Translation service upsell (€35/doc)
+  - NEW: Priority processing upsell (€50)
+  - NEW: VIP bundle (€320) and Phase 4 bundle (€175)
+  - NEW: Country-specific antecedentes difficulty info
+  - NEW: Phase 2 pitch after 3+ docs uploaded
+  - NEW: Centralized STRIPE_LINKS dict
+  - UPDATED: Welcome message with competitive pricing angle
+  - UPDATED: Doc upload response with audit CTA
+  - UPDATED: Extra services menu (5 services from 2)
+  - UPDATED: All Stripe references use STRIPE_LINKS dict
+  - UPDATED: All pricing references use PRICING dict consistently
+
 v5.4.0 (2026-02-08)
   - EXPANDED COUNTRIES: 25 countries (was 9) with verified antecedentes info
   - ADDED: /antecedentes command — country-specific criminal record instructions
@@ -142,6 +159,7 @@ ENV VARS:
 
 import os
 import re
+import json
 import sqlite3
 import logging
 import hashlib
@@ -206,12 +224,7 @@ ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_CHAT_IDS", "").split(
 SUPPORT_PHONE = os.environ.get("SUPPORT_PHONE", "+34 600 000 000")
 BIZUM_PHONE = os.environ.get("BIZUM_PHONE", "+34 600 000 000")
 BANK_IBAN = os.environ.get("BANK_IBAN", "ES00 0000 0000 0000 0000 0000")
-STRIPE_PHASE2_LINK = os.environ.get("STRIPE_PHASE2_LINK", "")  # Stripe payment link for €39
-STRIPE_PHASE3_LINK = os.environ.get("STRIPE_PHASE3_LINK", "")  # Stripe payment link for €150
-STRIPE_PHASE4_LINK = os.environ.get("STRIPE_PHASE4_LINK", "")  # Stripe payment link for €110
-STRIPE_PREPAY_LINK = os.environ.get("STRIPE_PREPAY_LINK", "")  # Stripe payment link for €254 full prepay
-STRIPE_ANTECEDENTES_LINK = os.environ.get("STRIPE_ANTECEDENTES_LINK", "")  # Stripe for €49 antecedentes
-STRIPE_GOVT_FEES_LINK = os.environ.get("STRIPE_GOVT_FEES_LINK", "")  # Stripe for €29 govt fees
+SUPPORT_PHONE_WA = os.environ.get("SUPPORT_PHONE_WA", SUPPORT_PHONE)  # WhatsApp number (may differ)
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")  # Claude API for document analysis
 # Debug: log API key availability at startup (never log the key itself)
 logging.getLogger("ph-bot").info(
@@ -261,17 +274,43 @@ logger = logging.getLogger("ph-bot")
 # =============================================================================
 
 PRICING = {
-    "phase1": 0,       # Free — build trust
-    "phase2": 39,      # After 3+ docs — legal review
-    "phase3": 150,     # Docs verified — processing
-    "phase4": 110,     # Filing window opens
-    "total_service": 299,
-    "prepay": 254,     # 15% discount for full upfront payment
-    "prepay_savings": 45,
-    "antecedentes_service": 49,   # We handle certificate + apostille + translation
-    "govt_fees_service": 29,      # We handle 790 tax form payments
+    "phase1": 0,       # FREE — upload docs, get comfortable
+    "phase2": 39,      # Audit + personalized strategy
+    "phase3": 150,     # Tailored expediente preparation
+    "phase4": 110,     # Submission + tracking
+    "total_phases": 299,
+    "prepay_discount": 45,
+    "prepay_total": 254,
+    # Extra services
+    "antecedentes_spain": 15,      # Spain criminal record (we handle Cl@ve)
+    "antecedentes_foreign": 49,    # Foreign certificate + apostille + translation
+    "govt_fees_service": 29,       # We handle 790 tax form payments
+    "translation_per_doc": 35,     # Sworn translation per document
+    "urgent_processing": 50,       # Priority queue
+    # Government fees (external — paid to government)
     "gov_fee": 38.28,
     "tie_card": 16,
+    # Bundles
+    "vip_bundle": 320,             # Phase 2+3+4 + antec Spain + govt fees
+    "phase4_bundle": 175,          # Phase 4 + govt fees service + govt taxes
+    # Referral
+    "referral_discount": 25,
+    "referral_credit": 25,
+    "referral_max": 299,
+}
+
+# Stripe payment links (env vars — set in Railway)
+STRIPE_LINKS = {
+    "phase2": os.environ.get("STRIPE_PHASE2_LINK", ""),
+    "phase3": os.environ.get("STRIPE_PHASE3_LINK", ""),
+    "phase4": os.environ.get("STRIPE_PHASE4_LINK", ""),
+    "prepay": os.environ.get("STRIPE_PREPAY_LINK", ""),
+    "antecedentes_spain": os.environ.get("STRIPE_ANTEC_SPAIN_LINK", ""),
+    "antecedentes_foreign": os.environ.get("STRIPE_ANTEC_FOREIGN_LINK", ""),
+    "govt_fees": os.environ.get("STRIPE_GOVT_FEES_LINK", ""),
+    "translation": os.environ.get("STRIPE_TRANSLATION_LINK", ""),
+    "vip_bundle": os.environ.get("STRIPE_VIP_BUNDLE_LINK", ""),
+    "phase4_bundle": os.environ.get("STRIPE_PHASE4_BUNDLE_LINK", ""),
 }
 
 # =============================================================================
@@ -301,7 +340,9 @@ PRICING = {
     ST_HUMAN_MSG,
     ST_ENTER_REFERRAL_CODE,
     ST_FAQ_CATEGORY,
-) = range(22)
+    ST_PHASE2_QUESTIONNAIRE,
+    ST_PHASE2_TEXT_ANSWER,
+) = range(24)
 
 # =============================================================================
 # REFERRAL SYSTEM
@@ -343,6 +384,99 @@ COUNTRIES = {
     "gh": {"name": "Ghana", "flag": "🇬🇭", "demonym": "ghanés/a"},
     "other": {"name": "Otro país", "flag": "🌍", "demonym": ""},
 }
+
+# =============================================================================
+# COUNTRY-SPECIFIC ANTECEDENTES INFO (for upsell messaging)
+# =============================================================================
+
+COUNTRIES_ANTECEDENTES_INFO = {
+    "co": {"difficulty": "media", "time": "2-3 semanas", "process": "Online + apostilla presencial", "notes": "Apostilla en Cancillería puede demorar"},
+    "ve": {"difficulty": "alta", "time": "3-6 semanas", "process": "Presencial en Venezuela o consulado", "notes": "Proceso complicado por situación del país"},
+    "pe": {"difficulty": "media", "time": "2-4 semanas", "process": "Online + apostilla", "notes": "Relativamente sencillo si tienes DNI peruano"},
+    "ec": {"difficulty": "media", "time": "2-3 semanas", "process": "Online + apostilla en Cancillería", "notes": "Apostilla puede hacerse online"},
+    "hn": {"difficulty": "alta", "time": "3-5 semanas", "process": "Presencial + apostilla", "notes": "Requiere gestiones locales"},
+    "ma": {"difficulty": "alta", "time": "4-6 semanas", "process": "Consulado + legalización", "notes": "No es país Convenio de La Haya (sin apostilla)"},
+    "sn": {"difficulty": "alta", "time": "4-8 semanas", "process": "Consulado + legalización", "notes": "No es país Convenio de La Haya"},
+    "ar": {"difficulty": "baja", "time": "1-2 semanas", "process": "Online + apostilla electrónica", "notes": "Proceso relativamente rápido"},
+    "bo": {"difficulty": "media", "time": "2-4 semanas", "process": "Presencial + apostilla", "notes": "Gestión en consulado o Bolivia"},
+    "br": {"difficulty": "media", "time": "2-3 semanas", "process": "Online + apostilla", "notes": "Certificado digital disponible online"},
+    "do": {"difficulty": "media", "time": "2-3 semanas", "process": "Online + apostilla", "notes": "Procuraduría General emite online"},
+    "cu": {"difficulty": "alta", "time": "4-8 semanas", "process": "Consulado exclusivamente", "notes": "Solo se gestiona vía consulado en España"},
+    "cn": {"difficulty": "alta", "time": "4-6 semanas", "process": "Consulado + legalización", "notes": "Proceso largo, requiere documentación china"},
+    "pk": {"difficulty": "alta", "time": "4-6 semanas", "process": "Consulado + legalización", "notes": "Requiere verificación adicional"},
+    "ng": {"difficulty": "alta", "time": "4-8 semanas", "process": "Consulado + legalización", "notes": "Tiempos variables por situación local"},
+}
+
+# =============================================================================
+# PHASE 2 DEEP QUESTIONNAIRE
+# =============================================================================
+
+PHASE2_QUESTIONS = [
+    # SECTION 1: History in Spain
+    {"id": "arrival_date", "text": "📅 *¿Cuándo llegaste a España?*\n\nSi no recuerdas la fecha exacta, pon aproximada.", "type": "text", "section": "Historia en España"},
+    {"id": "left_spain", "text": "✈️ *¿Has salido de España desde que llegaste?*", "type": "buttons",
+     "options": [("No, nunca", "left_never"), ("Sí, una vez", "left_once"), ("Sí, varias veces", "left_multiple")],
+     "section": "Historia en España"},
+    {"id": "left_spain_details", "text": "¿Cuándo saliste y por cuánto tiempo?\n\n(Ejemplo: 'Diciembre 2024, 2 semanas')", "type": "text",
+     "condition_field": "left_spain", "condition_values": ["left_once", "left_multiple"], "section": "Historia en España"},
+    {"id": "arrival_proof", "text": "📄 *¿Tienes algún documento de tu llegada a España?*", "type": "buttons",
+     "options": [("Billete de avión", "arrival_ticket"), ("Sello en pasaporte", "arrival_stamp"), ("Ambos", "arrival_both"), ("No tengo nada", "arrival_none")],
+     "section": "Historia en España"},
+    # SECTION 2: Current Situation
+    {"id": "housing", "text": "🏠 *¿Dónde vives actualmente?*", "type": "buttons",
+     "options": [("Piso alquilado a mi nombre", "housing_own"), ("Piso a nombre de otro", "housing_other"),
+                 ("Habitación subarrendada", "housing_room"), ("Con familiares/amigos", "housing_family"), ("Otro", "housing_other_situation")],
+     "section": "Situación Actual"},
+    {"id": "employment", "text": "💼 *¿Trabajas actualmente?*", "type": "buttons",
+     "options": [("Sí, con contrato", "work_contract"), ("Sí, sin contrato", "work_informal"),
+                 ("Trabajo por apps (Glovo, etc)", "work_apps"), ("No trabajo", "work_none")],
+     "section": "Situación Actual"},
+    {"id": "employment_details", "text": "¿En qué sector trabajas y cuánto tiempo llevas?", "type": "text",
+     "condition_field": "employment", "condition_values": ["work_contract", "work_informal", "work_apps"], "section": "Situación Actual"},
+    {"id": "bank_account", "text": "🏦 *¿Tienes cuenta bancaria en España?*", "type": "buttons",
+     "options": [("Sí, banco tradicional", "bank_traditional"), ("Sí, solo Revolut/N26/Wise", "bank_fintech"),
+                 ("Ambos", "bank_both"), ("No tengo cuenta", "bank_none")],
+     "section": "Situación Actual"},
+    # SECTION 3: Family & Ties
+    {"id": "children", "text": "👶 *¿Tienes hijos menores en España?*", "type": "buttons",
+     "options": [("Sí", "children_yes"), ("No", "children_no")], "section": "Familia y Vínculos"},
+    {"id": "children_details", "text": "¿Cuántos hijos? ¿Edades? ¿Nacieron aquí o llegaron contigo?", "type": "text",
+     "condition_field": "children", "condition_values": ["children_yes"], "section": "Familia y Vínculos"},
+    {"id": "partner", "text": "💑 *¿Tienes pareja en España?*", "type": "buttons",
+     "options": [("Sí, con papeles (española/o o residente)", "partner_legal"), ("Sí, también irregular", "partner_irregular"), ("No", "partner_none")],
+     "section": "Familia y Vínculos"},
+    {"id": "other_family", "text": "👨‍👩‍👧 *¿Tienes otros familiares en España con papeles?*\n\n(Padres, hermanos, tíos...)", "type": "buttons",
+     "options": [("Sí", "family_yes"), ("No", "family_no")], "section": "Familia y Vínculos"},
+    {"id": "other_family_details", "text": "¿Qué familiar y qué tipo de permiso tiene?", "type": "text",
+     "condition_field": "other_family", "condition_values": ["family_yes"], "section": "Familia y Vínculos"},
+    # SECTION 4: Legal History
+    {"id": "police_spain", "text": "👮 *¿Has tenido algún problema con la policía en España?*\n\n_Esto es confidencial y nos ayuda a preparar tu caso._", "type": "buttons",
+     "options": [("No, nunca", "police_never"), ("Sí, algo menor", "police_minor"), ("Sí, algo serio", "police_serious")],
+     "section": "Historial Legal"},
+    {"id": "police_details", "text": "Cuéntanos brevemente qué pasó.\n\n_Esta información es confidencial y nos ayuda a preparar tu defensa._", "type": "text",
+     "condition_field": "police_spain", "condition_values": ["police_minor", "police_serious"], "section": "Historial Legal"},
+    {"id": "antecedentes_origin", "text": "📜 *¿Tienes antecedentes penales en tu país de origen?*", "type": "buttons",
+     "options": [("No", "antecedentes_none"), ("Sí, pero cancelados", "antecedentes_cancelled"),
+                 ("Sí, vigentes", "antecedentes_active"), ("No estoy seguro", "antecedentes_unsure")],
+     "section": "Historial Legal"},
+    {"id": "asylum", "text": "🛡️ *¿Has solicitado asilo en España?*", "type": "buttons",
+     "options": [("No", "asylum_no"), ("Sí, pendiente (tarjeta roja)", "asylum_pending"),
+                 ("Sí, denegado", "asylum_denied"), ("Sí, aprobado", "asylum_approved")],
+     "section": "Historial Legal"},
+    # SECTION 5: Documentation Status
+    {"id": "passport_status", "text": "🛂 *¿Tu pasaporte está vigente?*", "type": "buttons",
+     "options": [("Sí, vigente", "passport_valid"), ("Sí, pero caduca pronto", "passport_expiring"),
+                 ("No, está caducado", "passport_expired"), ("Lo perdí", "passport_lost")],
+     "section": "Documentación"},
+    {"id": "antecedentes_foreign_status", "text": "📜 *¿Ya tienes tus antecedentes penales de tu país?*", "type": "buttons",
+     "options": [("Sí, apostillados y traducidos", "antec_ready"), ("Sí, pero sin apostillar/traducir", "antec_partial"),
+                 ("No, todavía no los pedí", "antec_none"), ("Es muy difícil conseguirlos", "antec_difficult")],
+     "section": "Documentación"},
+    {"id": "empadronamiento_status", "text": "📍 *¿Tienes empadronamiento?*", "type": "buttons",
+     "options": [("Sí, actualizado", "empad_current"), ("Sí, pero antiguo", "empad_old"),
+                 ("Nunca me empadroné", "empad_never"), ("Me quitaron del padrón", "empad_removed")],
+     "section": "Documentación"},
+]
 
 # =============================================================================
 # DOCUMENT TYPES + VALIDATION CONFIG
@@ -973,63 +1107,7 @@ FAQ = {
         "title": "¿Cuánto cuesta la regularización?",
         "keywords": ["precio", "cuesta", "cuánto cuesta", "tarifa", "caro", "barato",
                      "dinero", "costo", "tasas", "modelo 790", "gobierno"],
-        "text": (
-            "💰 *¿Cuánto Cuesta la Regularización?*\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "📋 NUESTRO SERVICIO\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "*Pago por fases:* €299 total\n"
-            "*Pago único:* €254 (ahorras €45) ⭐\n\n"
-            "📌 *Fase 1 — GRATIS*\n"
-            "• Verificación de elegibilidad\n"
-            "• Subida de documentos\n\n"
-            "📌 *Fase 2 — €39*\n"
-            "• Revisión legal completa\n"
-            "• Verificación de documentos\n\n"
-            "📌 *Fase 3 — €150*\n"
-            "• Preparación del expediente\n"
-            "• Redacción de escritos legales\n\n"
-            "📌 *Fase 4 — €110*\n"
-            "• Presentación de solicitud\n"
-            "• Seguimiento hasta resolución\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "💳 OPCIONES DE PAGO\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "*⭐ Pago único: €254*\n"
-            "Ahorras €45 (15% descuento)\n\n"
-            "*Por fases: €299*\n"
-            "Paga cada fase cuando estés listo.\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "🎁 DESCUENTOS\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "• €25 con código de amigo\n"
-            "• Hasta €299 por referir amigos\n"
-            "• 15% si pagas todo de una vez\n\n"
-            "_Los descuentos son acumulables._\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "📦 SERVICIOS ADICIONALES\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "*Antecedentes penales: +€49*\n"
-            "Solicitud + apostilla + traducción\n\n"
-            "*Gestión tasas gobierno: +€29*\n"
-            "Pagamos las tasas 790 por ti\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "🏛️ TASAS DEL GOBIERNO\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "El gobierno cobra tasas adicionales:\n\n"
-            "• Tasa 790-052: ~€16-20\n"
-            "• Tasa 790-012 (TIE): ~€16-21\n"
-            "• Antecedentes España: ~€3.86\n\n"
-            "*Total gobierno: ~€40-50*\n\n"
-            "Estas se pagan directamente al gobierno.\n"
-            "💡 Por €29, las gestionamos por ti.\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "⚠️ IMPORTANTE\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "En 2005, el *10-20% de solicitudes fueron DENEGADAS* por errores "
-            "en documentación.\n\n"
-            "Nuestros abogados revisan cada detalle."
-        ),
+        "text": PRICING_EXPLANATION,
     },
     "por_que_pagar": {
         "title": "¿Por qué usar un servicio?",
@@ -1223,9 +1301,16 @@ def init_db():
             expediente_ready INTEGER DEFAULT 0,
             state TEXT DEFAULT 'new',
             escalation_queue TEXT,
+            phase2_answers TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
+
+        # Migration: add phase2_answers if missing
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN phase2_answers TEXT")
+        except Exception:
+            pass
 
         c.execute("""CREATE TABLE IF NOT EXISTS cases (
             id SERIAL PRIMARY KEY,
@@ -1281,9 +1366,16 @@ def init_db():
             expediente_ready INTEGER DEFAULT 0,
             state TEXT DEFAULT 'new',
             escalation_queue TEXT,
+            phase2_answers TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""")
+
+        # Migration: add phase2_answers if missing
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN phase2_answers TEXT")
+        except Exception:
+            pass
 
         c.execute("""CREATE TABLE IF NOT EXISTS cases (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2587,18 +2679,19 @@ def _payment_buttons(paid_callback: str, stripe_link: str = "") -> InlineKeyboar
 
 def docs_ready_payment_kb(has_referral_discount: bool = False) -> InlineKeyboardMarkup:
     """Payment options shown AFTER documents are uploaded (not at eligibility)."""
-    prepay_price = PRICING["prepay"] - REFERRAL_FRIEND_DISCOUNT if has_referral_discount else PRICING["prepay"]
-    phase2_price = PRICING["phase2"] - REFERRAL_FRIEND_DISCOUNT if has_referral_discount else PRICING["phase2"]
+    prepay_price = PRICING["prepay_total"] - PRICING["referral_discount"] if has_referral_discount else PRICING["prepay_total"]
+    phase2_price = PRICING["phase2"] - PRICING["referral_discount"] if has_referral_discount else PRICING["phase2"]
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(
-            f"⭐ Pagar TODO — €{prepay_price} (ahorra €{PRICING['prepay_savings']})",
+            f"⭐ Pagar TODO — €{prepay_price} (ahorra €{PRICING['prepay_discount']})",
             callback_data="pay_full")],
         [InlineKeyboardButton(
-            f"💳 Pagar revisión — €{phase2_price}",
+            f"⚖️ Auditoría personalizada — €{phase2_price}",
             callback_data="m_pay2")],
         [InlineKeyboardButton(
-            "📄 Subir más documentos",
+            "📤 Subir más documentos",
             callback_data="m_upload")],
+        [InlineKeyboardButton("❓ ¿Por qué estos precios?", callback_data="faq_pricing")],
         [InlineKeyboardButton("← Menú", callback_data="back")],
     ])
 
@@ -2615,7 +2708,7 @@ ANTECEDENTES_HELP_TEXT = (
     "━━━━━━━━━━━━━━━━━━━━\n"
     "💼 NUESTRO SERVICIO DE ANTECEDENTES\n"
     "━━━━━━━━━━━━━━━━━━━━\n\n"
-    f"Por *€{PRICING['antecedentes_service']}* nos encargamos de todo:\n\n"
+    f"Por *€{PRICING['antecedentes_foreign']}* nos encargamos de todo:\n\n"
     "✅ Investigamos el proceso de tu país\n"
     "✅ Solicitamos el certificado\n"
     "✅ Gestionamos apostilla/legalización\n"
@@ -2624,6 +2717,192 @@ ANTECEDENTES_HELP_TEXT = (
     "⏱️ Tiempo: 2-4 semanas (varía por país)\n\n"
     "⚠️ _Nota: Algunos países tienen procesos muy complejos o lentos. "
     "Te informaremos antes de empezar si tu país presenta dificultades especiales._"
+)
+
+# --- Spain antecedentes upsell ---
+UPSELL_ANTECEDENTES_SPAIN = (
+    "📜 *Antecedentes Penales de España*\n\n"
+    "Este documento es *obligatorio* para tu solicitud.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "EL PROBLEMA\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "Para conseguirlo tú mismo necesitas:\n"
+    "• Cl@ve o certificado digital (difícil sin NIE)\n"
+    "• O ir en persona con cita previa\n"
+    "• O enviarlo por correo y esperar\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    f"NUESTRA SOLUCIÓN — €{PRICING['antecedentes_spain']}\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "Lo tramitamos por ti:\n"
+    "✅ Solicitud en tu nombre (con autorización)\n"
+    "✅ Pago de la tasa (€3.86 incluido)\n"
+    "✅ Descarga y verificación\n"
+    "✅ Te lo enviamos en 24-48h\n\n"
+    "Sin Cl@ve. Sin colas. Sin complicaciones."
+)
+
+ANTECEDENTES_SPAIN_DIY = (
+    "👍 Perfecto, aquí tienes las instrucciones:\n\n"
+    "*Online (si tienes Cl@ve):*\n"
+    "1. Ve a sede.mjusticia.gob.es\n"
+    "2. Busca \"Certificado Antecedentes Penales\"\n"
+    "3. Identifícate con Cl@ve\n"
+    "4. Paga €3.86 (tasa 006)\n"
+    "5. Descarga el certificado\n\n"
+    "*En persona:*\n"
+    "1. Pide cita en tu Gerencia Territorial\n"
+    "2. Lleva pasaporte + formulario 790\n"
+    "3. Paga €3.86 en banco\n"
+    "4. Recógelo en el momento\n\n"
+    "*Por correo:*\n"
+    "1. Descarga modelo 790 de mjusticia.gob.es\n"
+    "2. Paga €3.86 en banco\n"
+    "3. Envía a: Ministerio de Justicia, Calle Bolsa 8, 28012 Madrid\n"
+    "4. Espera 10 días hábiles\n\n"
+    f"💡 Si cambias de opinión, el servicio de €{PRICING['antecedentes_spain']} sigue disponible."
+)
+
+# --- Translation upsell ---
+UPSELL_TRANSLATION = (
+    "🔤 *Este documento necesita traducción jurada*\n\n"
+    "Para el expediente de regularización, los documentos "
+    "deben estar en español o tener traducción jurada.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    f"SERVICIO DE TRADUCCIÓN — €{PRICING['translation_per_doc']}\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "Por cada documento:\n"
+    "✅ Traducción jurada oficial\n"
+    "✅ Traductor certificado\n"
+    "✅ Válida para extranjería\n"
+    "✅ Entrega en 48-72 horas\n\n"
+    "¿Quieres que traduzcamos este documento?"
+)
+
+# --- Priority processing upsell ---
+UPSELL_PRIORITY = (
+    "⚡ *Procesamiento Prioritario — €{price}*\n\n"
+    "¿Quieres ser de los primeros en presentar?\n\n"
+    "El plazo de solicitudes es abril-junio 2026.\n"
+    "Los primeros en presentar, primeros en recibir respuesta.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "QUÉ INCLUYE\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "✅ Tu expediente se prepara primero\n"
+    "✅ Presentación en los primeros días de abril\n"
+    "✅ Seguimiento reforzado\n"
+    "✅ Respuesta a requerimientos en 24h\n\n"
+    "💡 Ideal si tu situación es urgente o quieres tranquilidad."
+).format(price=PRICING['urgent_processing'])
+
+# --- Pricing explanation (competitive messaging) ---
+PRICING_EXPLANATION = (
+    "💰 *Nuestros Precios*\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "📊 ¿POR QUÉ SOMOS MÁS BARATOS?\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "Otros despachos cobran €389-450 por este proceso.\n"
+    f"Nosotros cobramos *€{PRICING['total_phases']}* (o *€{PRICING['prepay_total']}* pagando de una vez).\n\n"
+    "¿Cómo es posible?\n\n"
+    "1️⃣ *Tecnología*\n"
+    "Automatizamos la organización de documentos, verificación de datos, "
+    "y seguimiento. Menos trabajo manual = menos coste.\n\n"
+    "2️⃣ *Experiencia 2005*\n"
+    "Ya hicimos esto hace 20 años. Sabemos exactamente qué funciona y qué no. "
+    "Sin ensayo y error.\n\n"
+    "3️⃣ *Volumen*\n"
+    "Podemos atender más casos con el mismo equipo, gracias a la automatización.\n\n"
+    "*El resultado:* Servicio premium a precio justo.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "💳 OPCIONES DE PAGO\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "*Opción 1: Pago por fases*\n"
+    f"• Fase 2 (auditoría): €{PRICING['phase2']}\n"
+    f"• Fase 3 (expediente): €{PRICING['phase3']}\n"
+    f"• Fase 4 (presentación): €{PRICING['phase4']}\n"
+    f"• *Total: €{PRICING['total_phases']}*\n\n"
+    "*Opción 2: Pago único* ⭐ RECOMENDADO\n"
+    f"• Todo incluido: *€{PRICING['prepay_total']}*\n"
+    f"• Ahorras €{PRICING['prepay_discount']} (15%)\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "🛠️ SERVICIOS ADICIONALES\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "Opcionales, para quien los necesite:\n\n"
+    f"• Antecedentes España: *€{PRICING['antecedentes_spain']}*\n"
+    "  (Lo tramitamos por ti)\n\n"
+    f"• Antecedentes país de origen: *€{PRICING['antecedentes_foreign']}*\n"
+    "  (Solicitud + apostilla + traducción)\n\n"
+    f"• Gestión de tasas gubernamentales: *€{PRICING['govt_fees_service']}*\n"
+    "  (Pagamos las tasas 790 por ti)\n\n"
+    f"• Traducción jurada: *€{PRICING['translation_per_doc']}/documento*\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "🏛️ TASAS DEL GOBIERNO (aparte)\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "Estas tasas las cobra el gobierno, no nosotros:\n"
+    "• Tasa 790-052: ~€16-20\n"
+    "• Tasa TIE: ~€16-21\n"
+    "• Total gobierno: ~€40-50\n\n"
+    f"💡 ¿Quieres que las gestionemos? Por €{PRICING['govt_fees_service']} pagamos todo por ti."
+)
+
+# --- Phase 2 pitch (shown after 3+ docs uploaded) ---
+PHASE2_PITCH = (
+    "📊 *Has subido {{doc_count}} documentos. Buen trabajo.*\n\n"
+    "Ahora viene la parte importante: *entender TU caso*.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    f"⚖️ AUDITORÍA PERSONALIZADA — €{PRICING['phase2']}\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "No vamos a darte un checklist genérico.\n"
+    "Vamos a:\n\n"
+    "✅ *Revisar cada documento* que subiste\n"
+    "✅ *Hacerte preguntas específicas* sobre tu situación\n"
+    "✅ *Identificar fortalezas y debilidades* de TU caso\n"
+    "✅ *Crear una estrategia personalizada* solo para ti\n"
+    "✅ *Detectar qué documentos te faltan*\n\n"
+    "Esto no es un \"estudio de viabilidad\" de 5 minutos.\n"
+    "Es tu *diagnóstico legal completo*.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    f"💡 *¿Por qué €{PRICING['phase2']}?*\n"
+    f"Otros cobran €{PRICING['phase2']} por un formulario genérico.\n"
+    "Nosotros te damos una auditoría real porque ya tenemos tus documentos.\n\n"
+    "⭐ *¿Prefieres pagar todo de una vez?*\n"
+    f"Por €{PRICING['prepay_total']} tienes TODO el servicio hasta la resolución.\n"
+    f"Ahorras €{PRICING['prepay_discount']} y te olvidas de pagos."
+)
+
+# --- Bundle offers ---
+PHASE4_BUNDLE_OFFER = (
+    "📦 *Oferta Fase Final*\n\n"
+    "Estás a punto de completar tu proceso.\n"
+    "Te ofrecemos un paquete con todo incluido:\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "PAQUETE COMPLETO\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    f"• Fase 4 (presentación + seguimiento): €{PRICING['phase4']}\n"
+    f"• Gestión de tasas gubernamentales: €{PRICING['govt_fees_service']}\n"
+    "• Total tasas gobierno (~€45): incluido *\n\n"
+    f"*Precio del paquete: €{PRICING['phase4_bundle']}* (en vez de €{PRICING['phase4'] + PRICING['govt_fees_service']}+tasas)\n"
+    "Ahorras y no te preocupas de nada.\n\n"
+    "\\* Nos encargaremos de todo: pago de tasas, "
+    "presentación, seguimiento, requerimientos."
+)
+
+VIP_BUNDLE_OFFER = (
+    "⭐ *Servicio Completo Todo Incluido*\n\n"
+    "¿Prefieres no preocuparte de nada?\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    f"PAQUETE VIP — €{PRICING['vip_bundle']}\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "Todo incluido:\n"
+    "✅ Auditoría personalizada (Fase 2)\n"
+    "✅ Expediente a medida (Fase 3)\n"
+    "✅ Presentación y seguimiento (Fase 4)\n"
+    "✅ Antecedentes España tramitados\n"
+    "✅ Gestión de tasas gubernamentales\n\n"
+    f"*Precio normal:* €{PRICING['phase2']} + €{PRICING['phase3']} + €{PRICING['phase4']} + "
+    f"€{PRICING['antecedentes_spain']} + €{PRICING['govt_fees_service']} = "
+    f"€{PRICING['phase2'] + PRICING['phase3'] + PRICING['phase4'] + PRICING['antecedentes_spain'] + PRICING['govt_fees_service']}\n"
+    f"*Precio paquete:* €{PRICING['vip_bundle']}\n\n"
+    f"Ahorras €{PRICING['phase2'] + PRICING['phase3'] + PRICING['phase4'] + PRICING['antecedentes_spain'] + PRICING['govt_fees_service'] - PRICING['vip_bundle']} y tienes TODO resuelto."
 )
 
 
@@ -2722,9 +3001,9 @@ FAQ_PROOF_DOCUMENTS_FULL = (
 
 
 def antecedentes_service_kb() -> InlineKeyboardMarkup:
-    """Buttons for antecedentes service offer — direct payment."""
+    """Buttons for foreign antecedentes service offer."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"💼 Contratar servicio — €{PRICING['antecedentes_service']}", callback_data="buy_antecedentes")],
+        [InlineKeyboardButton(f"📩 Sí, quiero ayuda — €{PRICING['antecedentes_foreign']}", callback_data="buy_antecedentes")],
         [InlineKeyboardButton("📋 Lo hago yo mismo", callback_data="back")],
     ])
 
@@ -2732,18 +3011,259 @@ def antecedentes_service_kb() -> InlineKeyboardMarkup:
 def antecedentes_help_kb() -> InlineKeyboardMarkup:
     """Buttons for antecedentes help — request support flow."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📩 Solicitar ayuda con antecedentes", callback_data="request_antecedentes_help")],
+        [InlineKeyboardButton(f"🌍 Antecedentes país de origen — €{PRICING['antecedentes_foreign']}", callback_data="request_antecedentes_help")],
+        [InlineKeyboardButton(f"📜 Antecedentes España — €{PRICING['antecedentes_spain']}", callback_data="upsell_antec_spain")],
         [InlineKeyboardButton("📋 Lo gestiono yo mismo", callback_data="m_checklist")],
         [InlineKeyboardButton("← Menú", callback_data="back")],
+    ])
+
+
+def antecedentes_spain_kb() -> InlineKeyboardMarkup:
+    """Buttons for Spain antecedentes upsell."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"✅ Sí, tramitadlo — €{PRICING['antecedentes_spain']}", callback_data="buy_antec_spain")],
+        [InlineKeyboardButton("📋 Lo hago yo mismo", callback_data="diy_antec_spain")],
+        [InlineKeyboardButton("← Volver", callback_data="antecedentes_help")],
     ])
 
 
 def govt_fees_service_kb() -> InlineKeyboardMarkup:
     """Buttons for government fees service offer."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"💼 Añadir servicio — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
+        [InlineKeyboardButton(f"✅ Sí, gestionadlo — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
         [InlineKeyboardButton("📋 Las pago yo mismo", callback_data="back")],
+        [InlineKeyboardButton("❓ ¿Cómo se pagan?", callback_data="explain_govt_fees")],
     ])
+
+
+def translation_service_kb() -> InlineKeyboardMarkup:
+    """Buttons for translation service upsell."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"✅ Traducir documento — €{PRICING['translation_per_doc']}", callback_data="buy_translation")],
+        [InlineKeyboardButton("📋 Ya tengo traductor", callback_data="back")],
+    ])
+
+
+def phase4_bundle_kb() -> InlineKeyboardMarkup:
+    """Buttons for Phase 4 bundle offer."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"📦 Paquete completo — €{PRICING['phase4_bundle']}", callback_data="buy_phase4_bundle")],
+        [InlineKeyboardButton(f"📤 Solo Fase 4 — €{PRICING['phase4']}", callback_data="m_pay4")],
+    ])
+
+
+def vip_bundle_kb(has_referral: bool = False) -> InlineKeyboardMarkup:
+    """Buttons for VIP bundle offer."""
+    price = PRICING['vip_bundle'] - PRICING['referral_discount'] if has_referral else PRICING['vip_bundle']
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"⭐ Paquete VIP — €{price}", callback_data="buy_vip_bundle")],
+        [InlineKeyboardButton(f"⚖️ Solo auditoría — €{PRICING['phase2']}", callback_data="m_pay2")],
+        [InlineKeyboardButton("❓ ¿Qué incluye?", callback_data="faq_pricing")],
+    ])
+
+
+def get_antecedentes_upsell_message(country_code: str) -> str:
+    """Get country-specific antecedentes upsell message."""
+    country = COUNTRIES.get(country_code, COUNTRIES["other"])
+    info = COUNTRIES_ANTECEDENTES_INFO.get(country_code, {})
+    difficulty_emoji = {"baja": "🟢", "media": "🟡", "alta": "🔴"}.get(info.get("difficulty", "media"), "🟡")
+
+    if not info:
+        return ANTECEDENTES_HELP_TEXT
+
+    return (
+        f"🌍 *Antecedentes Penales de {country['name']}* {country['flag']}\n\n"
+        "Este documento es *obligatorio* para tu solicitud.\n"
+        "Debe estar apostillado/legalizado y traducido.\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"INFORMACIÓN DE {country['name'].upper()}\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{difficulty_emoji} Dificultad: {info.get('difficulty', 'variable').capitalize()}\n"
+        f"⏱️ Tiempo estimado: {info.get('time', '2-6 semanas')}\n"
+        f"📋 Proceso: {info.get('process', 'Variable')}\n\n"
+        f"💡 {info.get('notes', '')}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "¿QUIERES QUE NOS ENCARGUEMOS?\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Por *€{PRICING['antecedentes_foreign']}* gestionamos TODO:\n"
+        "✅ Solicitamos el certificado\n"
+        "✅ Gestionamos apostilla/legalización\n"
+        "✅ Traducción jurada incluida\n"
+        "✅ Te lo entregamos listo para presentar\n\n"
+        "⚠️ *Importante:* Muchos candidatos pierden el plazo por empezar tarde con este trámite."
+    )
+
+
+# --- Phase 2 Questionnaire helpers ---
+
+def get_next_question_index(answers: Dict, current_idx: int) -> int:
+    """Get the next question index, skipping conditional questions whose conditions aren't met."""
+    for i in range(current_idx + 1, len(PHASE2_QUESTIONS)):
+        q = PHASE2_QUESTIONS[i]
+        cond_field = q.get("condition_field")
+        if cond_field:
+            cond_values = q.get("condition_values", [])
+            if answers.get(cond_field) not in cond_values:
+                continue
+        return i
+    return -1  # No more questions
+
+
+def build_question_keyboard(question: Dict) -> InlineKeyboardMarkup:
+    """Build keyboard for a Phase 2 question."""
+    if question["type"] == "buttons":
+        btns = []
+        for label, value in question.get("options", []):
+            btns.append([InlineKeyboardButton(label, callback_data=f"p2q_{question['id']}_{value}")])
+        btns.append([InlineKeyboardButton("⏭️ Saltar", callback_data=f"p2q_{question['id']}_skip")])
+        return InlineKeyboardMarkup(btns)
+    return None
+
+
+def generate_phase2_report(user: Dict, answers: Dict) -> str:
+    """Generate personalized strategy report based on questionnaire + documents."""
+    country = COUNTRIES.get(user.get("country_code", "other"), COUNTRIES["other"])
+
+    strengths = []
+    weaknesses = []
+    recommendations = []
+
+    # Passport analysis
+    ps = answers.get("passport_status", "")
+    if ps == "passport_valid":
+        strengths.append("✅ Pasaporte vigente")
+    elif ps == "passport_expiring":
+        weaknesses.append("⚠️ Pasaporte caduca pronto")
+        recommendations.append("Renueva tu pasaporte en el consulado ANTES de abril")
+    elif ps in ("passport_expired", "passport_lost"):
+        weaknesses.append("🔴 Pasaporte no vigente — urgente renovar")
+        recommendations.append("Contacta tu consulado INMEDIATAMENTE para renovar pasaporte")
+
+    # Housing
+    housing = answers.get("housing", "")
+    if housing == "housing_own":
+        strengths.append("✅ Vivienda a tu nombre — excelente prueba")
+    elif housing in ("housing_other", "housing_room"):
+        recommendations.append("Intenta conseguir un contrato de subarrendamiento o declaración del titular")
+
+    # Employment
+    emp = answers.get("employment", "")
+    if emp == "work_contract":
+        strengths.append("✅ Empleo con contrato — fortalece mucho tu caso")
+    elif emp in ("work_informal", "work_apps"):
+        strengths.append("✅ Actividad laboral (documentar recibos y registros)")
+
+    # Bank account
+    bank = answers.get("bank_account", "")
+    if bank in ("bank_traditional", "bank_both"):
+        strengths.append("✅ Cuenta bancaria en España")
+    elif bank == "bank_fintech":
+        strengths.append("✅ Cuenta fintech — extractos son válidos como prueba")
+
+    # Children
+    if answers.get("children") == "children_yes":
+        strengths.append("✅ Hijos menores en España — fortalece significativamente")
+        recommendations.append("Incluir documentación escolar/sanitaria de los hijos")
+
+    # Partner
+    partner = answers.get("partner", "")
+    if partner == "partner_legal":
+        strengths.append("✅ Pareja con residencia legal — vínculo fuerte")
+    elif partner == "partner_irregular":
+        recommendations.append("Tu pareja también podría acogerse a esta regularización")
+
+    # Family ties
+    if answers.get("other_family") == "family_yes":
+        strengths.append("✅ Familiares con papeles en España — vínculo importante")
+
+    # Empadronamiento
+    empad = answers.get("empadronamiento_status", "")
+    if empad in ("empad_current", "empad_old"):
+        strengths.append("✅ Tiene empadronamiento")
+    elif empad in ("empad_never", "empad_removed"):
+        recommendations.append("No te preocupes por el empadronamiento — tienes otras pruebas válidas")
+
+    # Foreign antecedentes
+    antec = answers.get("antecedentes_foreign_status", "")
+    if antec == "antec_ready":
+        strengths.append("✅ Antecedentes penales del país listos")
+    elif antec == "antec_partial":
+        recommendations.append("Necesitas apostillar/traducir tus antecedentes — hazlo YA")
+    elif antec in ("antec_none", "antec_difficult"):
+        weaknesses.append("⚠️ Faltan antecedentes penales del país de origen")
+        recommendations.append("Solicita antecedentes de tu país lo antes posible")
+
+    # Police record
+    police = answers.get("police_spain", "")
+    if police == "police_never":
+        strengths.append("✅ Sin problemas policiales en España")
+    elif police == "police_minor":
+        recommendations.append("Tu abogado revisará el detalle — probablemente no sea problema")
+    elif police == "police_serious":
+        weaknesses.append("⚠️ Antecedentes policiales serios — requiere análisis legal detallado")
+
+    # Asylum
+    asylum = answers.get("asylum", "")
+    if asylum == "asylum_pending":
+        recommendations.append("Puedes aplicar con solicitud de asilo pendiente — compatibles")
+
+    # Travel outside Spain
+    left = answers.get("left_spain", "")
+    if left == "left_never":
+        strengths.append("✅ No ha salido de España — continuidad perfecta")
+    elif left in ("left_once", "left_multiple"):
+        recommendations.append("Documentar bien las fechas de salida y entrada — viajes cortos no rompen continuidad")
+
+    # Risk assessment
+    if len(weaknesses) == 0:
+        risk = "ALTA"
+        risk_msg = "Tu caso tiene buenas perspectivas"
+    elif len(weaknesses) <= 2:
+        risk = "MEDIA-ALTA"
+        risk_msg = "Tu caso es viable con algunos ajustes"
+    else:
+        risk = "MEDIA"
+        risk_msg = "Tu caso requiere atención especial en algunos puntos"
+
+    name = user.get("full_name") or user.get("first_name", "Usuario")
+    doc_count = get_doc_count(user["telegram_id"])
+
+    report = (
+        "📊 *INFORME DE AUDITORÍA PERSONALIZADA*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 *{name}*\n"
+        f"🌍 {country['flag']} {country['name']}\n"
+        f"📄 {doc_count} documentos subidos\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📈 EVALUACIÓN DE TU CASO\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"*Probabilidad de aprobación: {risk}*\n"
+        f"_{risk_msg}_\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "✅ FORTALEZAS DE TU CASO\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+    report += "\n".join(strengths) if strengths else "Analizando..."
+    report += (
+        "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "⚠️ PUNTOS DE ATENCIÓN\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+    report += "\n".join(weaknesses) if weaknesses else "Ninguno crítico detectado"
+    report += (
+        "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📋 RECOMENDACIONES\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+    report += "\n".join(f"• {r}" for r in recommendations) if recommendations else "• Tu caso está bien encaminado"
+    report += (
+        "\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "*¿Siguiente paso?*\n"
+        "Con esta información, podemos preparar tu expediente personalizado.\n"
+        f"Fase 3 (expediente a medida): €{PRICING['phase3']}"
+    )
+
+    return report
 
 
 def _user_doc_summary(tid: int) -> str:
@@ -2784,17 +3304,18 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             apply_referral_code_to_user(tid, result['code'], result['referrer_id'])
 
             await update.message.reply_text(
-                f"🎉 ¡Código aplicado! Tienes *€{REFERRAL_FRIEND_DISCOUNT} de descuento* en tu primer pago.\n\n"
+                f"🎉 ¡Código aplicado! Tienes *€{PRICING['referral_discount']} de descuento* en tu primer pago.\n\n"
                 "🇪🇸 *¡Bienvenido/a a tuspapeles2026!*\n\n"
                 "Esta plataforma ha sido desarrollada por los abogados de "
                 "*Pombo, Horowitz & Espinosa* para optimizar el proceso de regularización, "
                 "reduciendo el riesgo de error humano y de peticiones denegadas.\n\n"
-                "✅ Te guiamos paso a paso en todo el proceso\n"
-                "✅ Revisamos y verificamos cada documento\n"
-                "✅ Preparamos tu expediente completo\n"
-                "✅ Presentamos tu solicitud en abril-junio\n"
-                "✅ Seguimiento hasta resolución favorable\n\n"
-                "Empecemos verificando si cumples los requisitos básicos.\n\n"
+                "🎯 *¿Por qué somos diferentes?*\n\n"
+                "• *Experiencia 2005:* Participamos en la última regularización.\n"
+                "• *Tecnología:* Automatizamos lo repetitivo para enfocarnos en TU caso.\n"
+                "• *Personalización:* Cada expediente es único.\n\n"
+                f"📊 Servicio premium a precio competitivo: €{PRICING['total_phases']} "
+                f"(o €{PRICING['prepay_total']} pagando de una vez).\n"
+                "Otros cobran €389+ por un proceso genérico.\n\n"
                 "Para empezar, indícanos tu país de origen:",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=country_kb(),
@@ -2808,16 +3329,19 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "La regularización extraordinaria de 2026 es una oportunidad histórica, "
         "y estamos aquí para ayudarte a aprovecharla.\n\n"
         "Esta plataforma ha sido desarrollada por los abogados de "
-        "*Pombo, Horowitz & Espinosa* para optimizar el proceso de regularización "
-        "de cientos de clientes, reduciendo el riesgo de error humano y de "
-        "peticiones de regularización denegadas.\n\n"
-        "Combinando nuestra experiencia en la regularización del año 2005 con los "
-        "avances en inteligencia artificial, aseguramos que nuestros clientes se "
-        "benefician de un proceso eficiente, seguro y transparente.\n\n"
+        "*Pombo, Horowitz & Espinosa* para optimizar el proceso de regularización, "
+        "reduciendo el riesgo de error humano y de peticiones denegadas.\n\n"
+        "🎯 *¿Por qué somos diferentes?*\n\n"
+        "• *Experiencia 2005:* Participamos en la última regularización. Sabemos qué funciona.\n"
+        "• *Tecnología:* Automatizamos lo repetitivo para enfocarnos en TU caso.\n"
+        "• *Personalización:* No usamos plantillas. Cada expediente es único.\n\n"
+        f"📊 *Resultado:* Servicio premium a precio competitivo.\n"
+        f"€{PRICING['total_phases']} todo incluido (o €{PRICING['prepay_total']} si pagas de una vez).\n"
+        "Otros cobran €389+ por un proceso genérico.\n\n"
         "*Nuestro servicio completo incluye:*\n\n"
         "✅ Te guiamos paso a paso en todo el proceso\n"
         "✅ Revisamos y verificamos cada documento\n"
-        "✅ Preparamos tu expediente completo\n"
+        "✅ Preparamos tu expediente personalizado\n"
         "✅ Presentamos tu solicitud en abril-junio\n"
         "✅ Hacemos seguimiento con la administración\n"
         "✅ Gestionamos recursos si fuera necesario\n"
@@ -2825,7 +3349,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "El proceso es 100% por este chat. Sin citas, sin colas, sin complicaciones.\n\n"
         "📅 El plazo de solicitudes abre en abril y cierra el *30 de junio de 2026*.\n\n"
         "Empecemos verificando si cumples los requisitos básicos...\n\n"
-        "¿Tienes un código de un amigo? Si lo tienes, escríbelo ahora para €25 de descuento.\n\n"
+        f"¿Tienes un código de un amigo? Si lo tienes, escríbelo ahora para €{PRICING['referral_discount']} de descuento.\n\n"
         "Ejemplo: `MARIA-7K2P`",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
@@ -2930,7 +3454,7 @@ async def handle_referral_code_text(update: Update, ctx: ContextTypes.DEFAULT_TY
     apply_referral_code_to_user(tid, result['code'], result['referrer_id'])
 
     await update.message.reply_text(
-        f"Código aplicado. Tienes €{REFERRAL_FRIEND_DISCOUNT} de descuento en tu primer pago.\n\n"
+        f"Código aplicado. Tienes €{PRICING['referral_discount']} de descuento en tu primer pago.\n\n"
         "Para empezar, indíquenos su país de origen:",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=country_kb(),
@@ -3383,10 +3907,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ST_UPLOAD_PHOTO
 
     if d == "m_price":
-        await q.edit_message_text(FAQ["costo"]["text"], parse_mode=ParseMode.MARKDOWN,
+        await q.edit_message_text(PRICING_EXPLANATION, parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"⭐ Pagar TODO — €{PRICING['prepay']}", callback_data="pay_full")],
-                [InlineKeyboardButton(f"💳 Pagar Fase 2 — €{PRICING['phase2']}", callback_data="m_pay2")],
+                [InlineKeyboardButton(f"⭐ Pagar TODO — €{PRICING['prepay_total']}", callback_data="pay_full")],
+                [InlineKeyboardButton(f"⚖️ Auditoría — €{PRICING['phase2']}", callback_data="m_pay2")],
                 [InlineKeyboardButton("📦 Ver servicios adicionales", callback_data="extra_services")],
                 [InlineKeyboardButton("← Volver", callback_data="back")],
             ]))
@@ -3501,7 +4025,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             lines.append("• Informe de qué está correcto y qué falta.")
             lines.append("• Plan personalizado con plazos.")
 
-            kb = _payment_buttons("paid2", STRIPE_PHASE2_LINK)
+            kb = _payment_buttons("paid2", STRIPE_LINKS["phase2"])
 
         await q.edit_message_text(
             "\n".join(lines),
@@ -3550,15 +4074,17 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         share_btns = get_share_buttons(code)
 
         await q.edit_message_text(
-            "Pago recibido.\n\n"
-            "Nuestro equipo revisará su documentación en las próximas 24-48 horas.\n"
-            "Le notificaremos cuando esté listo para la siguiente fase.\n\n"
-            f"✅ Tu código está activo: `{code}`\n"
-            "Ganas €25 de crédito por cada amigo que pague.",
+            "✅ *Pago recibido.*\n\n"
+            "Ahora viene la parte más importante: *conocer tu caso en detalle*.\n\n"
+            "Te vamos a hacer unas preguntas sobre tu situación personal. "
+            "Con tus respuestas + tus documentos, generaremos un *informe de auditoría personalizado*.\n\n"
+            f"💡 Tu código de referidos está activo: `{code}`\n"
+            f"Ganas €{PRICING['referral_credit']} por cada amigo que pague.",
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=InlineKeyboardMarkup(
-                share_btns + [[InlineKeyboardButton("Ver mi progreso", callback_data="m_menu")]]
-            ),
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📋 Comenzar cuestionario", callback_data="start_questionnaire")],
+                [InlineKeyboardButton("⏰ Más tarde", callback_data="back")],
+            ]),
         )
         return ST_MAIN_MENU
 
@@ -3571,7 +4097,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "• Revisión final por abogado.\n"
             "• Puesto reservado en cola de presentación.\n\n"
         )
-        if STRIPE_PHASE3_LINK:
+        if STRIPE_LINKS["phase3"]:
             text += "Pulse *Pagar con tarjeta* para un pago seguro instantáneo."
         else:
             text += (
@@ -3583,7 +4109,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         await q.edit_message_text(
             text,
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=_payment_buttons("paid3", STRIPE_PHASE3_LINK))
+            reply_markup=_payment_buttons("paid3", STRIPE_LINKS["phase3"]))
         return ST_PAY_PHASE3
 
     if d == "paid3":
@@ -3609,8 +4135,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "• Seguimiento del estado de su solicitud.\n"
             "• Notificación inmediata de resolución.\n"
             "• Asistencia para recogida de TIE.\n\n"
+            f"📦 *¿Quieres todo incluido?* Por €{PRICING['phase4_bundle']} te gestionamos "
+            "también las tasas del gobierno.\n\n"
         )
-        if STRIPE_PHASE4_LINK:
+        if STRIPE_LINKS["phase4"]:
             text += "Pulse *Pagar con tarjeta* para un pago seguro instantáneo."
         else:
             text += (
@@ -3619,10 +4147,14 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                 f"Transferencia: {BANK_IBAN}\n"
                 "Concepto: su nombre + número de expediente."
             )
+        kb_buttons = []
+        if STRIPE_LINKS["phase4_bundle"]:
+            kb_buttons.append([InlineKeyboardButton(f"📦 Paquete completo — €{PRICING['phase4_bundle']}", callback_data="buy_phase4_bundle")])
+        kb_buttons.extend(_payment_buttons("paid4", STRIPE_LINKS["phase4"]).inline_keyboard)
         await q.edit_message_text(
             text,
             parse_mode=ParseMode.MARKDOWN,
-            reply_markup=_payment_buttons("paid4", STRIPE_PHASE4_LINK))
+            reply_markup=InlineKeyboardMarkup(kb_buttons))
         return ST_PAY_PHASE4
 
     if d == "paid4":
@@ -3656,11 +4188,11 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         tid = update.effective_user.id
         u = get_user(tid)
         has_referral = u.get("used_referral_code") is not None
-        price = PRICING["prepay"] - REFERRAL_FRIEND_DISCOUNT if has_referral else PRICING["prepay"]
-        referral_line = "\n🎁 _Descuento de €25 aplicado por usar código de amigo._\n" if has_referral else ""
+        price = PRICING["prepay_total"] - PRICING["referral_discount"] if has_referral else PRICING["prepay_total"]
+        referral_line = f"\n🎁 _Descuento de €{PRICING['referral_discount']} aplicado por usar código de amigo._\n" if has_referral else ""
         btns = []
-        if STRIPE_PREPAY_LINK:
-            btns.append([InlineKeyboardButton(f"💳 Pagar €{price}", url=STRIPE_PREPAY_LINK)])
+        if STRIPE_LINKS["prepay"]:
+            btns.append([InlineKeyboardButton(f"💳 Pagar €{price}", url=STRIPE_LINKS["prepay"])])
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
         btns.append([InlineKeyboardButton("Tengo dudas", callback_data="m_contact")])
         btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
@@ -3728,7 +4260,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"Telegram: @{uname}\n"
             f"ID: {tid}\n"
             f"País: {country_code}\n\n"
-            f"Contactar para dar presupuesto de servicio antecedentes (€{PRICING['antecedentes_service']} estándar)."
+            f"Contactar para dar presupuesto de servicio antecedentes (€{PRICING['antecedentes_foreign']} estándar)."
         )
         for admin_id in ADMIN_IDS:
             try:
@@ -3749,20 +4281,17 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
     if d == "buy_antecedentes":
         tid = update.effective_user.id
+        u = get_user(tid)
+        country_code = u.get("country_code", "other") if u else "other"
+        # Show country-specific upsell message
+        upsell_msg = get_antecedentes_upsell_message(country_code)
         btns = []
-        if STRIPE_ANTECEDENTES_LINK:
-            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['antecedentes_service']}", url=STRIPE_ANTECEDENTES_LINK)])
+        if STRIPE_LINKS["antecedentes_foreign"]:
+            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['antecedentes_foreign']}", url=STRIPE_LINKS["antecedentes_foreign"])])
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
         btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
         await q.edit_message_text(
-            f"💼 *Servicio de Antecedentes Penales — €{PRICING['antecedentes_service']}*\n\n"
-            "Nos encargamos de todo:\n\n"
-            "✅ Solicitar el certificado en tu país de origen\n"
-            "✅ Gestionar la apostilla o legalización\n"
-            "✅ Traducción jurada al español (si necesario)\n"
-            "✅ Entrega en formato digital, listo para presentar\n\n"
-            "⏱️ Tiempo estimado: 2-4 semanas (varía por país)\n\n"
-            "Necesitaremos algunos datos adicionales después del pago.",
+            upsell_msg,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(btns))
         return ST_MAIN_MENU
@@ -3770,8 +4299,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "buy_govt_fees":
         tid = update.effective_user.id
         btns = []
-        if STRIPE_GOVT_FEES_LINK:
-            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['govt_fees_service']}", url=STRIPE_GOVT_FEES_LINK)])
+        if STRIPE_LINKS["govt_fees"]:
+            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['govt_fees_service']}", url=STRIPE_LINKS["govt_fees"])])
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
         btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
         await q.edit_message_text(
@@ -3793,19 +4322,186 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "📦 *Servicios Adicionales*\n\n"
             "Estos servicios son opcionales. Te ayudan a simplificar el proceso.\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"🌍 *Antecedentes Penales — €{PRICING['antecedentes_service']}*\n"
-            "Nos encargamos de solicitar, apostillar y traducir tu certificado "
-            "de antecedentes del país de origen.\n\n"
+            f"📜 *Antecedentes España — €{PRICING['antecedentes_spain']}*\n"
+            "Lo tramitamos por ti (sin Cl@ve, sin colas).\n\n"
+            f"🌍 *Antecedentes País de Origen — €{PRICING['antecedentes_foreign']}*\n"
+            "Solicitud + apostilla + traducción jurada.\n\n"
             f"🏛️ *Gestión de Tasas — €{PRICING['govt_fees_service']}*\n"
-            "Pagamos y gestionamos las tasas gubernamentales "
-            "(790-052, 790-012) por ti.\n\n"
+            "Pagamos las tasas gubernamentales (790) por ti.\n\n"
+            f"🔤 *Traducción Jurada — €{PRICING['translation_per_doc']}/doc*\n"
+            "Traducción oficial válida para extranjería.\n\n"
+            f"⚡ *Procesamiento Prioritario — €{PRICING['urgent_processing']}*\n"
+            "Tu expediente se prepara y presenta primero.\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "_Puedes añadir estos servicios en cualquier momento._",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"🌍 Antecedentes — €{PRICING['antecedentes_service']}", callback_data="buy_antecedentes")],
+                [InlineKeyboardButton(f"📜 Antecedentes España — €{PRICING['antecedentes_spain']}", callback_data="upsell_antec_spain")],
+                [InlineKeyboardButton(f"🌍 Antecedentes país — €{PRICING['antecedentes_foreign']}", callback_data="buy_antecedentes")],
                 [InlineKeyboardButton(f"🏛️ Tasas gobierno — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
+                [InlineKeyboardButton(f"🔤 Traducción — €{PRICING['translation_per_doc']}/doc", callback_data="buy_translation")],
+                [InlineKeyboardButton(f"⚡ Prioritario — €{PRICING['urgent_processing']}", callback_data="buy_priority")],
                 [InlineKeyboardButton("← Volver", callback_data="back")],
+            ]))
+        return ST_MAIN_MENU
+
+    # --- Spain antecedentes upsell ---
+    if d == "upsell_antec_spain":
+        await q.edit_message_text(
+            UPSELL_ANTECEDENTES_SPAIN,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=antecedentes_spain_kb())
+        return ST_MAIN_MENU
+
+    if d == "buy_antec_spain":
+        btns = []
+        if STRIPE_LINKS["antecedentes_spain"]:
+            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['antecedentes_spain']}", url=STRIPE_LINKS["antecedentes_spain"])])
+        btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
+        btns.append([InlineKeyboardButton("← Volver", callback_data="extra_services")])
+        await q.edit_message_text(
+            f"📜 *Antecedentes España — €{PRICING['antecedentes_spain']}*\n\n"
+            "Para tramitar en tu nombre, necesitamos:\n\n"
+            "1️⃣ *Autorización firmada* (te enviamos el documento)\n"
+            "2️⃣ *Copia de tu pasaporte*\n"
+            "3️⃣ *Pago de €{price}*\n\n"
+            "Tras el pago, te contactaremos para los datos.".format(price=PRICING['antecedentes_spain']),
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(btns))
+        return ST_MAIN_MENU
+
+    if d == "diy_antec_spain":
+        await q.edit_message_text(
+            ANTECEDENTES_SPAIN_DIY,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"He cambiado de opinión — €{PRICING['antecedentes_spain']}", callback_data="buy_antec_spain")],
+                [InlineKeyboardButton("← Menú", callback_data="back")],
+            ]))
+        return ST_MAIN_MENU
+
+    # --- Translation service ---
+    if d == "buy_translation":
+        btns = []
+        if STRIPE_LINKS["translation"]:
+            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['translation_per_doc']}", url=STRIPE_LINKS["translation"])])
+        btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
+        btns.append([InlineKeyboardButton("← Volver", callback_data="extra_services")])
+        await q.edit_message_text(
+            UPSELL_TRANSLATION,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(btns))
+        return ST_MAIN_MENU
+
+    # --- Priority processing ---
+    if d == "buy_priority":
+        btns = []
+        btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
+        btns.append([InlineKeyboardButton("← Volver", callback_data="extra_services")])
+        await q.edit_message_text(
+            UPSELL_PRIORITY,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(btns))
+        return ST_MAIN_MENU
+
+    # --- Bundle offers ---
+    if d == "buy_vip_bundle":
+        u = get_user(update.effective_user.id)
+        has_referral = u.get("used_referral_code") is not None if u else False
+        price = PRICING['vip_bundle'] - PRICING['referral_discount'] if has_referral else PRICING['vip_bundle']
+        btns = []
+        if STRIPE_LINKS["vip_bundle"]:
+            btns.append([InlineKeyboardButton(f"💳 Pagar €{price}", url=STRIPE_LINKS["vip_bundle"])])
+        btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
+        btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
+        await q.edit_message_text(
+            VIP_BUNDLE_OFFER,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(btns))
+        return ST_MAIN_MENU
+
+    if d == "buy_phase4_bundle":
+        btns = []
+        if STRIPE_LINKS["phase4_bundle"]:
+            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['phase4_bundle']}", url=STRIPE_LINKS["phase4_bundle"])])
+        btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
+        btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
+        await q.edit_message_text(
+            PHASE4_BUNDLE_OFFER,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(btns))
+        return ST_MAIN_MENU
+
+    # --- FAQ pricing explanation ---
+    if d == "faq_pricing":
+        await q.edit_message_text(
+            PRICING_EXPLANATION,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"⭐ Pagar TODO — €{PRICING['prepay_total']}", callback_data="pay_full")],
+                [InlineKeyboardButton(f"⚖️ Auditoría — €{PRICING['phase2']}", callback_data="m_pay2")],
+                [InlineKeyboardButton("📦 Servicios adicionales", callback_data="extra_services")],
+                [InlineKeyboardButton("← Menú", callback_data="back")],
+            ]))
+        return ST_MAIN_MENU
+
+    # --- Government fees explanation ---
+    if d == "explain_govt_fees":
+        await q.edit_message_text(
+            "🏛️ *Cómo se pagan las tasas del gobierno*\n\n"
+            "Las tasas gubernamentales se pagan a través de modelos 790 "
+            "en la web de la Agencia Tributaria.\n\n"
+            "• Modelo 790-052 (autorización de residencia): ~€16-20\n"
+            "• Modelo 790-012 (TIE - tarjeta física): ~€16-21\n\n"
+            "Para pagarlas necesitas:\n"
+            "• Acceder a sede.administracionespublicas.gob.es\n"
+            "• Rellenar los formularios correctamente\n"
+            "• Pagar con tarjeta o en banco\n\n"
+            f"💡 Por €{PRICING['govt_fees_service']} nos encargamos de todo esto por ti.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"✅ Gestionadlo — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
+                [InlineKeyboardButton("← Volver", callback_data="back")],
+            ]))
+        return ST_MAIN_MENU
+
+    # --- Phase 2 questionnaire start ---
+    if d == "start_questionnaire":
+        ctx.user_data["phase2_answers"] = {}
+        ctx.user_data["phase2_q_idx"] = 0
+        q_data = PHASE2_QUESTIONS[0]
+        section = q_data.get("section", "")
+        text = f"📋 *{section}*\n\n{q_data['text']}"
+        if q_data["type"] == "buttons":
+            await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
+                reply_markup=build_question_keyboard(q_data))
+            return ST_PHASE2_QUESTIONNAIRE
+        else:
+            await q.edit_message_text(
+                text + "\n\n_Escribe tu respuesta:_",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("⏭️ Saltar", callback_data=f"p2q_{q_data['id']}_skip")],
+                ]))
+            return ST_PHASE2_TEXT_ANSWER
+
+    # --- Phase 2 pitch (after 3+ docs) ---
+    if d == "request_phase2":
+        dc = get_doc_count(update.effective_user.id)
+        u = get_user(update.effective_user.id)
+        has_referral = u.get("used_referral_code") is not None if u else False
+        pitch = PHASE2_PITCH.replace("{{doc_count}}", str(dc))
+        phase2_price = PRICING["phase2"] - PRICING["referral_discount"] if has_referral else PRICING["phase2"]
+        prepay_price = PRICING["prepay_total"] - PRICING["referral_discount"] if has_referral else PRICING["prepay_total"]
+        await q.edit_message_text(
+            pitch,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(f"⚖️ Auditoría — €{phase2_price}", callback_data="m_pay2")],
+                [InlineKeyboardButton(f"⭐ Todo incluido — €{prepay_price}", callback_data="pay_full")],
+                [InlineKeyboardButton(f"⭐ VIP — €{PRICING['vip_bundle']}", callback_data="buy_vip_bundle")],
+                [InlineKeyboardButton("📤 Subir más documentos", callback_data="m_upload")],
+                [InlineKeyboardButton("❓ ¿Por qué estos precios?", callback_data="faq_pricing")],
             ]))
         return ST_MAIN_MENU
 
@@ -3824,6 +4520,151 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     return ST_MAIN_MENU
+
+
+# --- Phase 2 Questionnaire ---
+
+async def handle_phase2_questionnaire(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle button answers to Phase 2 questionnaire."""
+    q = update.callback_query
+    await q.answer()
+    d = q.data
+
+    answers = ctx.user_data.get("phase2_answers", {})
+    current_idx = ctx.user_data.get("phase2_q_idx", 0)
+
+    # Parse callback: p2q_{question_id}_{value}
+    if d.startswith("p2q_"):
+        parts = d[4:].rsplit("_", 1)
+        if len(parts) == 2:
+            q_id, value = parts
+            if value != "skip":
+                answers[q_id] = value
+            ctx.user_data["phase2_answers"] = answers
+
+    # Get next question
+    next_idx = get_next_question_index(answers, current_idx)
+
+    if next_idx < 0:
+        # Questionnaire complete — generate report
+        user = get_user(update.effective_user.id)
+        update_user(update.effective_user.id, phase2_answers=json.dumps(answers))
+        report = generate_phase2_report(user, answers)
+
+        # Check for upsell opportunities based on answers
+        upsell_btns = []
+        if answers.get("antecedentes_foreign_status") in ("antec_none", "antec_partial", "antec_difficult"):
+            upsell_btns.append([InlineKeyboardButton(
+                f"🌍 Antecedentes país — €{PRICING['antecedentes_foreign']}", callback_data="buy_antecedentes")])
+        if answers.get("passport_status") not in ("passport_valid",):
+            pass  # Just note in report, no upsell
+        upsell_btns.append([InlineKeyboardButton(
+            f"📜 Antecedentes España — €{PRICING['antecedentes_spain']}", callback_data="upsell_antec_spain")])
+
+        btns = upsell_btns + [
+            [InlineKeyboardButton(f"📦 Siguiente: expediente — €{PRICING['phase3']}", callback_data="m_pay3")],
+            [InlineKeyboardButton("📦 Ver servicios adicionales", callback_data="extra_services")],
+            [InlineKeyboardButton("← Menú", callback_data="back")],
+        ]
+
+        await q.edit_message_text(
+            report,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(btns))
+
+        # Notify admins
+        name = user.get("full_name") or user.get("first_name", "?")
+        await notify_admins(ctx,
+            f"📊 *Cuestionario Fase 2 completado*\n"
+            f"Usuario: {name} ({update.effective_user.id})\n"
+            f"Respuestas: {len(answers)}")
+        return ST_MAIN_MENU
+
+    # Show next question
+    ctx.user_data["phase2_q_idx"] = next_idx
+    q_data = PHASE2_QUESTIONS[next_idx]
+    section = q_data.get("section", "")
+    progress = f"({next_idx + 1}/{len(PHASE2_QUESTIONS)})"
+    text = f"📋 *{section}* {progress}\n\n{q_data['text']}"
+
+    if q_data["type"] == "buttons":
+        await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=build_question_keyboard(q_data))
+        return ST_PHASE2_QUESTIONNAIRE
+    else:
+        await q.edit_message_text(
+            text + "\n\n_Escribe tu respuesta:_",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⏭️ Saltar", callback_data=f"p2q_{q_data['id']}_skip")],
+            ]))
+        return ST_PHASE2_TEXT_ANSWER
+
+
+async def handle_phase2_text_answer(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle free-text answers to Phase 2 questionnaire."""
+    text = update.message.text or ""
+    answers = ctx.user_data.get("phase2_answers", {})
+    current_idx = ctx.user_data.get("phase2_q_idx", 0)
+
+    if current_idx < len(PHASE2_QUESTIONS):
+        q_data = PHASE2_QUESTIONS[current_idx]
+        answers[q_data["id"]] = text
+        ctx.user_data["phase2_answers"] = answers
+
+    # Get next question
+    next_idx = get_next_question_index(answers, current_idx)
+
+    if next_idx < 0:
+        # Questionnaire complete
+        user = get_user(update.effective_user.id)
+        update_user(update.effective_user.id, phase2_answers=json.dumps(answers))
+        report = generate_phase2_report(user, answers)
+
+        upsell_btns = []
+        if answers.get("antecedentes_foreign_status") in ("antec_none", "antec_partial", "antec_difficult"):
+            upsell_btns.append([InlineKeyboardButton(
+                f"🌍 Antecedentes país — €{PRICING['antecedentes_foreign']}", callback_data="buy_antecedentes")])
+        upsell_btns.append([InlineKeyboardButton(
+            f"📜 Antecedentes España — €{PRICING['antecedentes_spain']}", callback_data="upsell_antec_spain")])
+
+        btns = upsell_btns + [
+            [InlineKeyboardButton(f"📦 Siguiente: expediente — €{PRICING['phase3']}", callback_data="m_pay3")],
+            [InlineKeyboardButton("📦 Ver servicios adicionales", callback_data="extra_services")],
+            [InlineKeyboardButton("← Menú", callback_data="back")],
+        ]
+
+        await update.message.reply_text(
+            report,
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(btns))
+
+        name = user.get("full_name") or user.get("first_name", "?")
+        await notify_admins(ctx,
+            f"📊 *Cuestionario Fase 2 completado*\n"
+            f"Usuario: {name} ({update.effective_user.id})\n"
+            f"Respuestas: {len(answers)}")
+        return ST_MAIN_MENU
+
+    # Show next question
+    ctx.user_data["phase2_q_idx"] = next_idx
+    q_data = PHASE2_QUESTIONS[next_idx]
+    section = q_data.get("section", "")
+    progress = f"({next_idx + 1}/{len(PHASE2_QUESTIONS)})"
+    text_msg = f"📋 *{section}* {progress}\n\n{q_data['text']}"
+
+    if q_data["type"] == "buttons":
+        await update.message.reply_text(text_msg, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=build_question_keyboard(q_data))
+        return ST_PHASE2_QUESTIONNAIRE
+    else:
+        await update.message.reply_text(
+            text_msg + "\n\n_Escribe tu respuesta:_",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⏭️ Saltar", callback_data=f"p2q_{q_data['id']}_skip")],
+            ]))
+        return ST_PHASE2_TEXT_ANSWER
 
 
 # --- FAQ ---
@@ -3908,29 +4749,30 @@ async def handle_photo_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) ->
     dc = get_doc_count(tid)
     user = get_user(tid)
 
-    # Phase 2 unlock check
+    # Build response buttons based on doc count and phase
+    response_btns = [
+        [InlineKeyboardButton("📤 Subir otro documento", callback_data="m_upload")],
+    ]
     unlock = ""
     if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
-        unlock = "\n\n🎉 Ya puedes desbloquear la *revisión legal completa* por €39."
+        unlock = f"\n\n🎉 Ya puedes solicitar tu *auditoría personalizada* (€{PRICING['phase2']})."
+        response_btns.append([InlineKeyboardButton(f"⚖️ Solicitar auditoría (€{PRICING['phase2']})", callback_data="request_phase2")])
 
-    # Always show success to user
     share_hint = ""
     if dc >= 3:
-        share_hint = "\n\n💡 ¿Conoces a alguien en tu misma situación? Invítalo y gana €25 de crédito."
+        share_hint = f"\n\n💡 ¿Conoces a alguien en tu misma situación? Invítalo y gana €{PRICING['referral_credit']} de crédito."
+
+    response_btns.append([InlineKeyboardButton("📋 Ver mis documentos", callback_data="m_docs")])
+    response_btns.append([InlineKeyboardButton("← Menú", callback_data="back")])
 
     await update.message.reply_text(
         f"✅ *¡Documento recibido!*\n\n"
-        f"Tu *{info['name']}* ha sido guardado y será revisado por nuestro equipo "
-        f"legal en las próximas horas.\n\n"
-        f"Te notificaremos cuando esté verificado. Mientras tanto, puedes seguir "
-        f"subiendo más documentos.\n\n"
-        f"📄 Documentos subidos: {dc}{unlock}{share_hint}",
+        f"📄 {info['name']}\n"
+        f"📊 Total documentos: {dc}\n\n"
+        f"Puedes seguir subiendo más documentos o, cuando estés listo, "
+        f"solicitar tu auditoría personalizada.{unlock}{share_hint}",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
-            [InlineKeyboardButton("📣 Invitar amigos", callback_data="m_referidos")],
-            [InlineKeyboardButton("Volver al menú", callback_data="back")],
-        ]),
+        reply_markup=InlineKeyboardMarkup(response_btns),
     )
 
     # Notify admins with photo for review
@@ -3985,28 +4827,29 @@ async def handle_file_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
     dc = get_doc_count(tid)
     user = get_user(tid)
 
+    response_btns2 = [
+        [InlineKeyboardButton("📤 Subir otro documento", callback_data="m_upload")],
+    ]
     unlock = ""
     if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
-        unlock = "\n\n🎉 Ya puedes desbloquear la *revisión legal completa* por €39."
+        unlock = f"\n\n🎉 Ya puedes solicitar tu *auditoría personalizada* (€{PRICING['phase2']})."
+        response_btns2.append([InlineKeyboardButton(f"⚖️ Solicitar auditoría (€{PRICING['phase2']})", callback_data="request_phase2")])
 
-    # Always show success to user
     share_hint = ""
     if dc >= 3:
-        share_hint = "\n\n💡 ¿Conoces a alguien en tu misma situación? Invítalo y gana €25 de crédito."
+        share_hint = f"\n\n💡 ¿Conoces a alguien en tu misma situación? Invítalo y gana €{PRICING['referral_credit']} de crédito."
+
+    response_btns2.append([InlineKeyboardButton("📋 Ver mis documentos", callback_data="m_docs")])
+    response_btns2.append([InlineKeyboardButton("← Menú", callback_data="back")])
 
     await update.message.reply_text(
         f"✅ *¡Documento recibido!*\n\n"
-        f"Tu *{info['name']}* ha sido guardado y será revisado por nuestro equipo "
-        f"legal en las próximas horas.\n\n"
-        f"Te notificaremos cuando esté verificado. Mientras tanto, puedes seguir "
-        f"subiendo más documentos.\n\n"
-        f"📄 Documentos subidos: {dc}{unlock}{share_hint}",
+        f"📄 {info['name']}\n"
+        f"📊 Total documentos: {dc}\n\n"
+        f"Puedes seguir subiendo más documentos o, cuando estés listo, "
+        f"solicitar tu auditoría personalizada.{unlock}{share_hint}",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
-            [InlineKeyboardButton("📣 Invitar amigos", callback_data="m_referidos")],
-            [InlineKeyboardButton("Volver al menú", callback_data="back")],
-        ]),
+        reply_markup=InlineKeyboardMarkup(response_btns2),
     )
 
     # Notify admins
@@ -5472,6 +6315,15 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_human_msg),
                 CallbackQueryHandler(handle_menu),
             ],
+            ST_PHASE2_QUESTIONNAIRE: [
+                CallbackQueryHandler(handle_phase2_questionnaire, pattern="^p2q_"),
+                CallbackQueryHandler(handle_menu),
+            ],
+            ST_PHASE2_TEXT_ANSWER: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phase2_text_answer),
+                CallbackQueryHandler(handle_phase2_questionnaire, pattern="^p2q_"),
+                CallbackQueryHandler(handle_menu),
+            ],
         },
         fallbacks=[
             CommandHandler("start", cmd_start),
@@ -5528,7 +6380,7 @@ def main():
         job_queue.run_repeating(send_reminder_1week, interval=timedelta(hours=6), first=timedelta(minutes=15))
         logger.info("Re-engagement reminders scheduled (24h, 72h, 1week)")
 
-    logger.info("PH-Bot v5.7.0 starting")
+    logger.info("PH-Bot v5.8.0 starting")
     logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
     logger.info(f"Payment: FREE > €39 > €150 > €110 | Days left: {days_left()}")
     logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
