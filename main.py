@@ -891,8 +891,58 @@ FAQ_CATEGORIES = {
     },
 }
 
+# --- Pricing explanation (competitive messaging) — defined here so FAQ can reference it ---
+PRICING_EXPLANATION = (
+    "💰 *Nuestros Precios*\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "📊 ¿POR QUÉ SOMOS MÁS BARATOS?\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "Otros despachos cobran €389-450 por este proceso.\n"
+    f"Nosotros cobramos *€{PRICING['total_phases']}* (o *€{PRICING['prepay_total']}* pagando de una vez).\n\n"
+    "¿Cómo es posible?\n\n"
+    "1️⃣ *Tecnología*\n"
+    "Automatizamos la organización de documentos, verificación de datos, "
+    "y seguimiento. Menos trabajo manual = menos coste.\n\n"
+    "2️⃣ *Experiencia 2005*\n"
+    "Ya hicimos esto hace 20 años. Sabemos exactamente qué funciona y qué no. "
+    "Sin ensayo y error.\n\n"
+    "3️⃣ *Volumen*\n"
+    "Podemos atender más casos con el mismo equipo, gracias a la automatización.\n\n"
+    "*El resultado:* Servicio premium a precio justo.\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "💳 OPCIONES DE PAGO\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "*Opción 1: Pago por fases*\n"
+    f"• Fase 2 (auditoría): €{PRICING['phase2']}\n"
+    f"• Fase 3 (expediente): €{PRICING['phase3']}\n"
+    f"• Fase 4 (presentación): €{PRICING['phase4']}\n"
+    f"• *Total: €{PRICING['total_phases']}*\n\n"
+    "*Opción 2: Pago único* ⭐ RECOMENDADO\n"
+    f"• Todo incluido: *€{PRICING['prepay_total']}*\n"
+    f"• Ahorras €{PRICING['prepay_discount']} (15%)\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "🛠️ SERVICIOS ADICIONALES\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "Opcionales, para quien los necesite:\n\n"
+    f"• Antecedentes España: *€{PRICING['antecedentes_spain']}*\n"
+    "  (Lo tramitamos por ti)\n\n"
+    f"• Antecedentes país de origen: *€{PRICING['antecedentes_foreign']}*\n"
+    "  (Solicitud + apostilla + traducción)\n\n"
+    f"• Gestión de tasas gubernamentales: *€{PRICING['govt_fees_service']}*\n"
+    "  (Pagamos las tasas 790 por ti)\n\n"
+    f"• Traducción jurada: *€{PRICING['translation_per_doc']}/documento*\n\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "🏛️ TASAS DEL GOBIERNO (aparte)\n"
+    "━━━━━━━━━━━━━━━━━━━━\n\n"
+    "Estas tasas las cobra el gobierno, no nosotros:\n"
+    "• Tasa 790-052: ~€16-20\n"
+    "• Tasa TIE: ~€16-21\n"
+    "• Total gobierno: ~€40-50\n\n"
+    f"💡 ¿Quieres que las gestionemos? Por €{PRICING['govt_fees_service']} pagamos todo por ti."
+)
+
 # =============================================================================
-# FAQ DATABASE — 41 entries, professional tone
+# FAQ DATABASE — 44 entries, professional tone
 # =============================================================================
 
 FAQ = {
@@ -2965,56 +3015,6 @@ UPSELL_PRIORITY = (
     "✅ Respuesta a requerimientos en 24h\n\n"
     "💡 Ideal si tu situación es urgente o quieres tranquilidad."
 ).format(price=PRICING['urgent_processing'])
-
-# --- Pricing explanation (competitive messaging) ---
-PRICING_EXPLANATION = (
-    "💰 *Nuestros Precios*\n\n"
-    "━━━━━━━━━━━━━━━━━━━━\n"
-    "📊 ¿POR QUÉ SOMOS MÁS BARATOS?\n"
-    "━━━━━━━━━━━━━━━━━━━━\n\n"
-    "Otros despachos cobran €389-450 por este proceso.\n"
-    f"Nosotros cobramos *€{PRICING['total_phases']}* (o *€{PRICING['prepay_total']}* pagando de una vez).\n\n"
-    "¿Cómo es posible?\n\n"
-    "1️⃣ *Tecnología*\n"
-    "Automatizamos la organización de documentos, verificación de datos, "
-    "y seguimiento. Menos trabajo manual = menos coste.\n\n"
-    "2️⃣ *Experiencia 2005*\n"
-    "Ya hicimos esto hace 20 años. Sabemos exactamente qué funciona y qué no. "
-    "Sin ensayo y error.\n\n"
-    "3️⃣ *Volumen*\n"
-    "Podemos atender más casos con el mismo equipo, gracias a la automatización.\n\n"
-    "*El resultado:* Servicio premium a precio justo.\n\n"
-    "━━━━━━━━━━━━━━━━━━━━\n"
-    "💳 OPCIONES DE PAGO\n"
-    "━━━━━━━━━━━━━━━━━━━━\n\n"
-    "*Opción 1: Pago por fases*\n"
-    f"• Fase 2 (auditoría): €{PRICING['phase2']}\n"
-    f"• Fase 3 (expediente): €{PRICING['phase3']}\n"
-    f"• Fase 4 (presentación): €{PRICING['phase4']}\n"
-    f"• *Total: €{PRICING['total_phases']}*\n\n"
-    "*Opción 2: Pago único* ⭐ RECOMENDADO\n"
-    f"• Todo incluido: *€{PRICING['prepay_total']}*\n"
-    f"• Ahorras €{PRICING['prepay_discount']} (15%)\n\n"
-    "━━━━━━━━━━━━━━━━━━━━\n"
-    "🛠️ SERVICIOS ADICIONALES\n"
-    "━━━━━━━━━━━━━━━━━━━━\n\n"
-    "Opcionales, para quien los necesite:\n\n"
-    f"• Antecedentes España: *€{PRICING['antecedentes_spain']}*\n"
-    "  (Lo tramitamos por ti)\n\n"
-    f"• Antecedentes país de origen: *€{PRICING['antecedentes_foreign']}*\n"
-    "  (Solicitud + apostilla + traducción)\n\n"
-    f"• Gestión de tasas gubernamentales: *€{PRICING['govt_fees_service']}*\n"
-    "  (Pagamos las tasas 790 por ti)\n\n"
-    f"• Traducción jurada: *€{PRICING['translation_per_doc']}/documento*\n\n"
-    "━━━━━━━━━━━━━━━━━━━━\n"
-    "🏛️ TASAS DEL GOBIERNO (aparte)\n"
-    "━━━━━━━━━━━━━━━━━━━━\n\n"
-    "Estas tasas las cobra el gobierno, no nosotros:\n"
-    "• Tasa 790-052: ~€16-20\n"
-    "• Tasa TIE: ~€16-21\n"
-    "• Total gobierno: ~€40-50\n\n"
-    f"💡 ¿Quieres que las gestionemos? Por €{PRICING['govt_fees_service']} pagamos todo por ti."
-)
 
 # --- Phase 2 pitch (shown after 3+ docs uploaded) ---
 PHASE2_PITCH = (
