@@ -1,13 +1,26 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v5.9.0 — Client Intake & Case Management
+PH-Bot v5.10.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
 Updated:    2026-02-08
 
 CHANGELOG:
 ----------
+v5.10.0 (2026-02-08)
+  - NEW: Live capacity counter ("X de 1,000 plazas")
+  - NEW: Waitlist system — triggers at Phase 2 when capacity full
+  - NEW: Bypass waitlist with €254 prepay
+  - NEW: waitlist DB table (PostgreSQL + SQLite)
+  - NEW: /waitlist admin command (view capacity + waitlist stats)
+  - NEW: /release admin command (notify waitlist users)
+  - FIX: Referral credit triggers on friend's Phase 3 (was Phase 2, anti-gaming)
+  - FIX: Referral discount applies to Phase 3 messaging
+  - UPDATED: Eligibility message shows capacity counter
+  - UPDATED: request_phase2 checks capacity before showing payment
+  - UPDATED: /stats includes capacity + waitlist info
+
 v5.9.0 (2026-02-08)
   - NEW: Phase 3 questionnaire (30 questions: personal data, address, employment, family, submission)
   - NEW: phase3_answers DB column + migration (PostgreSQL + SQLite)
@@ -264,6 +277,12 @@ USE_POSTGRES = _test_postgres_connection()
 DEADLINE = datetime(2026, 6, 30, 23, 59, 59)
 DB_PATH = "tuspapeles.db"
 MIN_DOCS_FOR_PHASE2 = 3
+
+# =============================================================================
+# CAPACITY MANAGEMENT
+# =============================================================================
+TOTAL_CAPACITY = 1000
+PREPAY_BYPASS_PRICE = 254  # Pay full upfront = skip waitlist
 
 # =============================================================================
 # CRITICAL DATES — USE THESE CONSTANTS EVERYWHERE
@@ -1456,10 +1475,11 @@ FAQ = {
             "*Programa de referidos:*\n\n"
             "*Para tu amigo:*\n"
             "Si alguien usa tu código al registrarse, recibe €25 de descuento "
-            "en su primer pago.\n\n"
+            "en Fase 3 (expediente).\n\n"
             "*Para ti:*\n"
-            "Cuando pagues tu Fase 2 (€39) y tu amigo también pague, "
-            "ganas €25 de crédito que se aplica a tus siguientes pagos.\n\n"
+            "Cuando tu amigo pague Fase 3, ganas €25 de crédito "
+            "que se aplica a tus siguientes pagos.\n\n"
+            "Máximo: €299 en créditos (12 amigos = servicio gratis).\n\n"
             "Puedes ver tu código y estadísticas con el comando /referidos."
         ),
     },
@@ -1735,8 +1755,159 @@ def init_db():
         except Exception:
             conn.rollback()
 
+    # Create waitlist table
+    if USE_POSTGRES:
+        c.execute("""CREATE TABLE IF NOT EXISTS waitlist (
+            id SERIAL PRIMARY KEY,
+            telegram_id BIGINT UNIQUE NOT NULL,
+            name VARCHAR(100),
+            country VARCHAR(50),
+            docs_uploaded INTEGER DEFAULT 0,
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            notified BOOLEAN DEFAULT FALSE,
+            converted BOOLEAN DEFAULT FALSE
+        )""")
+    else:
+        c.execute("""CREATE TABLE IF NOT EXISTS waitlist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_id INTEGER UNIQUE NOT NULL,
+            name VARCHAR(100),
+            country VARCHAR(50),
+            docs_uploaded INTEGER DEFAULT 0,
+            joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            notified INTEGER DEFAULT 0,
+            converted INTEGER DEFAULT 0
+        )""")
+    conn.commit()
+
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_waitlist_telegram ON waitlist(telegram_id)")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
     conn.commit()
     conn.close()
+
+
+# =============================================================================
+# CAPACITY & WAITLIST FUNCTIONS
+# =============================================================================
+
+def get_current_clients() -> int:
+    """Count users who have paid Phase 2 or higher."""
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM users WHERE phase2_paid = 1")
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else 0
+
+
+def get_available_slots() -> int:
+    return max(0, TOTAL_CAPACITY - get_current_clients())
+
+
+def is_capacity_full() -> bool:
+    return get_available_slots() <= 0
+
+
+def get_capacity_message() -> str:
+    available = get_available_slots()
+    if available > 0:
+        return f"📊 Plazas disponibles: *{available} de {TOTAL_CAPACITY}*"
+    else:
+        return f"📊 *{TOTAL_CAPACITY} plazas ocupadas* — Lista de espera activa"
+
+
+def add_to_waitlist(telegram_id: int, name: str, country: str, docs_uploaded: int) -> None:
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    try:
+        if USE_POSTGRES:
+            c.execute(f"""INSERT INTO waitlist (telegram_id, name, country, docs_uploaded)
+                VALUES ({p}, {p}, {p}, {p})
+                ON CONFLICT (telegram_id) DO UPDATE SET docs_uploaded = {p}""",
+                (telegram_id, name, country, docs_uploaded, docs_uploaded))
+        else:
+            c.execute(f"""INSERT OR REPLACE INTO waitlist (telegram_id, name, country, docs_uploaded)
+                VALUES ({p}, {p}, {p}, {p})""",
+                (telegram_id, name, country, docs_uploaded))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error adding to waitlist: {e}")
+    finally:
+        conn.close()
+
+
+def get_waitlist_position(telegram_id: int) -> int:
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    c.execute(f"SELECT COUNT(*) FROM waitlist WHERE joined_at <= (SELECT joined_at FROM waitlist WHERE telegram_id = {p})", (telegram_id,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else 0
+
+
+def get_waitlist_stats() -> dict:
+    conn = get_connection()
+    c = conn.cursor()
+    stats = {}
+    c.execute("SELECT COUNT(*) FROM waitlist")
+    stats['total'] = c.fetchone()[0]
+    if USE_POSTGRES:
+        c.execute("SELECT COUNT(*) FROM waitlist WHERE notified = TRUE")
+    else:
+        c.execute("SELECT COUNT(*) FROM waitlist WHERE notified = 1")
+    stats['notified'] = c.fetchone()[0]
+    if USE_POSTGRES:
+        c.execute("SELECT COUNT(*) FROM waitlist WHERE converted = TRUE")
+    else:
+        c.execute("SELECT COUNT(*) FROM waitlist WHERE converted = 1")
+    stats['converted'] = c.fetchone()[0]
+    c.execute("SELECT country, COUNT(*) FROM waitlist GROUP BY country ORDER BY COUNT(*) DESC")
+    stats['by_country'] = {row[0] or 'Unknown': row[1] for row in c.fetchall()}
+    conn.close()
+    return stats
+
+
+def get_waitlist_users(limit: int = 10, notified: bool = False) -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    if USE_POSTGRES:
+        val = notified
+    else:
+        val = 1 if notified else 0
+    c.execute(f"SELECT telegram_id, name FROM waitlist WHERE notified = {p} ORDER BY joined_at ASC LIMIT {limit}", (val,))
+    rows = c.fetchall()
+    conn.close()
+    return [{'telegram_id': r[0], 'name': r[1]} for r in rows]
+
+
+def mark_waitlist_notified(telegram_id: int) -> None:
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    if USE_POSTGRES:
+        c.execute(f"UPDATE waitlist SET notified = TRUE WHERE telegram_id = {p}", (telegram_id,))
+    else:
+        c.execute(f"UPDATE waitlist SET notified = 1 WHERE telegram_id = {p}", (telegram_id,))
+    conn.commit()
+    conn.close()
+
+
+def is_on_waitlist(telegram_id: int) -> bool:
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    c.execute(f"SELECT 1 FROM waitlist WHERE telegram_id = {p}", (telegram_id,))
+    row = c.fetchone()
+    conn.close()
+    return row is not None
 
 
 # =============================================================================
@@ -3867,27 +4038,21 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         code = user['referral_code']
 
+    cap_msg = get_capacity_message()
     await q.edit_message_text(
         f"✅ *¡Buenas noticias, {name}!*\n\n"
         "Según tus respuestas, cumples los requisitos básicos para la "
         "regularización extraordinaria de 2026.\n\n"
+        f"{cap_msg}\n\n"
         f"Expediente: *{case['case_number']}*\n"
         f"Plazo: 1 abril — 30 junio 2026 ({days_left()} días)\n\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "📋 SIGUIENTE PASO\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Sube tus documentos para que podamos verificarlos.\n\n"
-        "*Esta fase es 100% gratis:*\n"
-        "• Verificamos tu elegibilidad ✓ (completado)\n"
-        "• Subes tus documentos\n"
-        "• Te indicamos si falta algo\n\n"
-        "Cuando estén listos, un abogado los revisará en detalle (Fase 2, €39).\n\n"
-        f"💡 Tu código: `{code}`\n"
-        "_Más info en \"Invitar amigos\" del menú._",
+        "📤 *Siguiente paso:* Sube tus documentos\n\n"
+        "Sin prisa. Sin compromiso.\n"
+        "💡 *Fase 1 es 100% gratis.*",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📄 Subir documentos", callback_data="m_upload")],
-            [InlineKeyboardButton("📋 Ver checklist de documentos", callback_data="m_checklist")],
+            [InlineKeyboardButton("📤 Subir documentos", callback_data="m_upload")],
+            [InlineKeyboardButton("📋 Ver documentos válidos", callback_data="m_checklist")],
             [InlineKeyboardButton("❓ Tengo preguntas", callback_data="m_faq")],
         ]),
     )
@@ -4240,21 +4405,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         # Update user status
         update_user(tid, phase2_paid=1, current_phase=2, state="phase2_active")
 
-        # Credit the referrer
-        result = credit_referrer(tid, 39)
-
-        if result.get('credited'):
-            # Minimal notification to referrer
-            try:
-                user_data = get_user(tid)
-                await ctx.bot.send_message(
-                    result['referrer_id'],
-                    f"Tu amigo {user_data.get('first_name', 'alguien')} usó tu código. +€{result['amount']} crédito.",
-                )
-            except Exception as e:
-                logger.error(f"Failed to notify referrer: {e}")
-
-        # Notify admins
+        # Notify admins (referrer credit moved to Phase 3)
         await notify_admins(ctx,
             f"Pago Fase 2: User {tid}\n"
             f"Descuento: €{discount} | Créditos: €{credits_used}")
@@ -4269,8 +4420,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Ahora viene la parte más importante: *conocer tu caso en detalle*.\n\n"
             "Te vamos a hacer unas preguntas sobre tu situación personal. "
             "Con tus respuestas + tus documentos, generaremos un *informe de auditoría personalizado*.\n\n"
-            f"💡 Tu código de referidos está activo: `{code}`\n"
-            f"Ganas €{PRICING['referral_credit']} por cada amigo que pague.",
+            f"💡 Tu código de referidos: `{code}`\n"
+            f"Cuando un amigo pague Fase 3, ambos ganáis €{PRICING['referral_credit']}.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("📋 Comenzar cuestionario", callback_data="start_questionnaire")],
@@ -4309,9 +4460,22 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
     if d == "paid3":
         tid = update.effective_user.id
-        update_user(tid, state="phase3_pending")
+        update_user(tid, state="phase3_pending", phase3_paid=1, current_phase=3)
         u = get_user(tid)
         code = u.get("referral_code", "") if u else ""
+
+        # Credit the referrer on Phase 3 payment (anti-gaming)
+        result = credit_referrer(tid, 150)
+        if result.get('credited'):
+            try:
+                user_data = get_user(tid)
+                await ctx.bot.send_message(
+                    result['referrer_id'],
+                    f"🎉 Tu amigo {user_data.get('first_name', 'alguien')} completó Fase 3. +€{result['amount']} crédito.",
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify referrer: {e}")
+
         await notify_admins(ctx,
             f"💳 *Pago Fase 3 pendiente*\n"
             f"Usuario: {user.get('first_name')}\n"
@@ -4722,24 +4886,106 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                 reply_markup=InlineKeyboardMarkup(skip_btn) if skip_btn else None)
             return ST_PHASE3_TEXT_ANSWER
 
-    # --- Phase 2 pitch (after 3+ docs) ---
+    # --- Phase 2 pitch (after 3+ docs) — capacity check ---
     if d == "request_phase2":
         dc = get_doc_count(update.effective_user.id)
         u = get_user(update.effective_user.id)
+
+        if is_capacity_full():
+            # CAPACITY FULL — waitlist or bypass
+            await q.edit_message_text(
+                f"📊 *Has subido {dc} documentos. Buen trabajo.*\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "⏳ LISTA DE ESPERA\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"Hemos alcanzado nuestra capacidad de {TOTAL_CAPACITY} casos "
+                "para garantizar atención personalizada.\n\n"
+                "*Tus documentos están guardados.*\n\n"
+                "Tienes 2 opciones:\n\n"
+                "1️⃣ *Apuntarte a la lista de espera*\n"
+                "   Te avisamos cuando haya plaza. Sin coste.\n\n"
+                f"2️⃣ *Reservar tu plaza ahora — €{PREPAY_BYPASS_PRICE}*\n"
+                "   Pago único. Todo incluido hasta la resolución.\n"
+                "   Empiezas mañana. Ahorras €45.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(f"⭐ Reservar plaza — €{PREPAY_BYPASS_PRICE}", callback_data="pay_bypass")],
+                    [InlineKeyboardButton("⏳ Apuntarme a la lista", callback_data="join_waitlist")],
+                    [InlineKeyboardButton("📤 Seguir subiendo docs", callback_data="m_upload")],
+                ]))
+            return ST_MAIN_MENU
+
+        # SLOTS AVAILABLE — normal Phase 2 pitch
+        available = get_available_slots()
         has_referral = u.get("used_referral_code") is not None if u else False
-        pitch = PHASE2_PITCH.replace("{{doc_count}}", str(dc))
         phase2_price = PRICING["phase2"] - PRICING["referral_discount"] if has_referral else PRICING["phase2"]
         prepay_price = PRICING["prepay_total"] - PRICING["referral_discount"] if has_referral else PRICING["prepay_total"]
+
         await q.edit_message_text(
-            pitch,
+            f"📊 *Has subido {dc} documentos. Buen trabajo.*\n\n"
+            f"📊 Plazas disponibles: *{available} de {TOTAL_CAPACITY}*\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "⚖️ AUDITORÍA PERSONALIZADA\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "✅ Revisamos cada documento\n"
+            "✅ 20+ preguntas sobre tu situación\n"
+            "✅ Estrategia personalizada\n"
+            "✅ Detectamos qué te falta\n\n"
+            f"⭐ *¿Prefieres pagar todo de una vez?*\n"
+            f"Por €{prepay_price} tienes TODO hasta la resolución. Ahorras €45.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton(f"⚖️ Auditoría — €{phase2_price}", callback_data="m_pay2")],
                 [InlineKeyboardButton(f"⭐ Todo incluido — €{prepay_price}", callback_data="pay_full")],
-                [InlineKeyboardButton(f"⭐ VIP — €{PRICING['vip_bundle']}", callback_data="buy_vip_bundle")],
                 [InlineKeyboardButton("📤 Subir más documentos", callback_data="m_upload")],
                 [InlineKeyboardButton("❓ ¿Por qué estos precios?", callback_data="faq_pricing")],
             ]))
+        return ST_MAIN_MENU
+
+    # --- Waitlist ---
+    if d == "join_waitlist":
+        tid = update.effective_user.id
+        u = get_user(tid)
+        dc = get_doc_count(tid)
+        name = u.get("full_name") or u.get("first_name", "") if u else ""
+        country = u.get("country_code", "") if u else ""
+        add_to_waitlist(tid, name, country, dc)
+        position = get_waitlist_position(tid)
+        await notify_admins(ctx, f"⏳ *Nuevo en lista de espera*\nUsuario: {name} ({tid})\nPosición: #{position}\nDocs: {dc}")
+        await q.edit_message_text(
+            f"✅ *Estás en la lista de espera*\n\n"
+            f"Tu posición: *#{position}*\n\n"
+            "Tus documentos están guardados.\n"
+            "Te avisaremos por este chat cuando haya plaza.\n\n"
+            "Mientras tanto, puedes seguir subiendo documentos.\n"
+            "Cuanto más preparado estés, más rápido será el proceso.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📤 Subir más documentos", callback_data="m_upload")],
+                [InlineKeyboardButton("📋 Ver mis documentos", callback_data="m_docs")],
+                [InlineKeyboardButton("← Menú", callback_data="back")],
+            ]))
+        return ST_MAIN_MENU
+
+    # --- Bypass waitlist with prepay ---
+    if d == "pay_bypass":
+        btns = []
+        if STRIPE_LINKS["prepay"]:
+            btns.append([InlineKeyboardButton(f"💳 Pagar €{PREPAY_BYPASS_PRICE}", url=STRIPE_LINKS["prepay"])])
+        btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
+        btns.append([InlineKeyboardButton("← Volver", callback_data="request_phase2")])
+        await q.edit_message_text(
+            f"⭐ *RESERVA TU PLAZA*\n\n"
+            f"Pago único: *€{PREPAY_BYPASS_PRICE}*\n\n"
+            "Incluye TODO hasta la resolución:\n"
+            "✅ Auditoría personalizada (Fase 2)\n"
+            "✅ Expediente a medida (Fase 3)\n"
+            "✅ Presentación + seguimiento (Fase 4)\n"
+            "✅ Recurso si necesario\n\n"
+            "*Ahorras €45* vs pago por fases.\n"
+            "*Empiezas mañana* — sin esperar lista.",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(btns))
         return ST_MAIN_MENU
 
     if d == "back":
@@ -5504,18 +5750,78 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     conn.close()
     rev = (p2 * 39) + (p3 * 150) + (p4 * 110)
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
+    available = get_available_slots()
+    wl_stats = get_waitlist_stats()
     await update.message.reply_text(
         f"*Estadísticas*\n\n"
         f"Usuarios: {total}\n"
         f"Elegibles: {eligible}\n"
         f"Documentos: {docs}\n"
         f"Mensajes recibidos: {msgs}\n\n"
-        f"Fase 2 pagados: {p2} (€{p2*47})\n"
+        f"Fase 2 pagados: {p2} (€{p2*39})\n"
         f"Fase 3 pagados: {p3} (€{p3*150})\n"
-        f"Fase 4 pagados: {p4} (€{p4*100})\n"
+        f"Fase 4 pagados: {p4} (€{p4*110})\n"
         f"*Ingresos: €{rev}*\n\n"
+        f"📊 *Capacidad:* {TOTAL_CAPACITY - available}/{TOTAL_CAPACITY} ({available} libres)\n"
+        f"⏳ *Lista espera:* {wl_stats['total']}\n\n"
         f"DB: {db_type}\n"
         f"Días restantes: {days_left()}", parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_waitlist(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin: /waitlist — view capacity and waitlist stats."""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    available = get_available_slots()
+    stats = get_waitlist_stats()
+    text = (
+        f"📊 *CAPACITY & WAITLIST*\n\n"
+        f"*Capacidad:*\n"
+        f"• Total: {TOTAL_CAPACITY}\n"
+        f"• Ocupadas: {TOTAL_CAPACITY - available}\n"
+        f"• Disponibles: {available}\n\n"
+        f"*Lista de espera:*\n"
+        f"• Total: {stats['total']}\n"
+        f"• Notificados: {stats['notified']}\n"
+        f"• Convertidos: {stats['converted']}\n\n"
+    )
+    if stats.get('by_country'):
+        text += "*Por país:*\n"
+        for country, count in stats['by_country'].items():
+            text += f"• {country}: {count}\n"
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_release(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Admin: /release [N] — notify N waitlist users that slots are open."""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+    try:
+        count = int(ctx.args[0]) if ctx.args else 10
+    except (ValueError, IndexError):
+        count = 10
+
+    users = get_waitlist_users(limit=count, notified=False)
+    sent = 0
+    for wl_user in users:
+        try:
+            await ctx.bot.send_message(
+                chat_id=wl_user['telegram_id'],
+                text=(
+                    "🎉 *¡Hay plaza para ti!*\n\n"
+                    "Se han abierto nuevas plazas y eres de los primeros.\n\n"
+                    "Tienes *48 horas* para continuar tu proceso.\n"
+                    "Tus documentos siguen guardados."
+                ),
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🚀 Continuar ahora", callback_data="request_phase2")]
+                ]))
+            mark_waitlist_notified(wl_user['telegram_id'])
+            sent += 1
+        except Exception as e:
+            logger.warning(f"Failed to notify waitlist {wl_user['telegram_id']}: {e}")
+    await update.message.reply_text(f"✅ Notificados: {sent}/{len(users)}")
 
 
 async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -6735,6 +7041,8 @@ def main():
     app.add_handler(CommandHandler("aprobar", cmd_aprobar), group=-1)
     app.add_handler(CommandHandler("rechazar", cmd_rechazar), group=-1)
     app.add_handler(CommandHandler("ver", cmd_ver), group=-1)
+    app.add_handler(CommandHandler("waitlist", cmd_waitlist), group=-1)
+    app.add_handler(CommandHandler("release", cmd_release), group=-1)
     app.add_handler(CallbackQueryHandler(handle_admin_doc_callback, pattern="^adoc_"), group=-1)
     app.add_handler(CallbackQueryHandler(handle_pending_doc_callback, pattern="^pdoc_"), group=-1)
     app.add_handler(CallbackQueryHandler(handle_rejection_reason_callback, pattern="^prej_"), group=-1)
@@ -6749,7 +7057,7 @@ def main():
         job_queue.run_repeating(send_reminder_1week, interval=timedelta(hours=6), first=timedelta(minutes=15))
         logger.info("Re-engagement reminders scheduled (24h, 72h, 1week)")
 
-    logger.info("PH-Bot v5.9.0 starting")
+    logger.info("PH-Bot v5.10.0 starting")
     logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
     logger.info(f"Payment: FREE > €39 > €150 > €110 | Days left: {days_left()}")
     logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
