@@ -2811,19 +2811,19 @@ def phase_status(user: Dict, doc_count: int) -> str:
 def country_kb() -> InlineKeyboardMarkup:
     """Generate country selection keyboard — top 25 non-EU nationalities in Spain."""
     countries_order = [
-        "ma", "co", "ve", "pe", "ec",   # Row 1: Top 5
-        "ar", "cn", "ua", "hn", "do",   # Row 2: 6-10
-        "pk", "bo", "br", "py", "ni",   # Row 3: 11-15
-        "cu", "ng", "sn", "gt", "sv",   # Row 4: 16-20
-        "in", "bd", "ph", "gh", "other", # Row 5: 21-25 + Other
+        "ma", "co", "ve", "pe", "ec",
+        "ar", "cn", "ua", "hn", "do",
+        "pk", "bo", "br", "py", "ni",
+        "cu", "ng", "sn", "gt", "sv",
+        "in", "bd", "ph", "gh", "other",
     ]
     rows = []
-    for i in range(0, len(countries_order), 5):
+    for i in range(0, len(countries_order), 2):
         row = []
-        for code in countries_order[i:i + 5]:
+        for code in countries_order[i:i + 2]:
             c = COUNTRIES[code]
             row.append(InlineKeyboardButton(
-                f"{c['flag']}", callback_data=f"c_{code}"))
+                f"{c['flag']} {c['name']}", callback_data=f"c_{code}"))
         rows.append(row)
     return InlineKeyboardMarkup(rows)
 
@@ -2948,9 +2948,12 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                 "🇪🇸 *¡Bienvenido/a a tuspapeles2026!*\n\n"
                 "Somos un equipo de abogados especializados en extranjería respaldados "
                 "por *Pombo & Horowitz Abogados*.\n\n"
-                "✅ Te guiamos paso a paso\n"
-                "✅ Revisamos cada documento\n"
-                "✅ Preparamos tu expediente completo\n\n"
+                "✅ Te guiamos paso a paso en todo el proceso\n"
+                "✅ Revisamos y verificamos cada documento\n"
+                "✅ Preparamos tu expediente completo\n"
+                "✅ Presentamos tu solicitud en abril-junio\n"
+                "✅ Seguimiento hasta resolución favorable\n\n"
+                "*Servicio llave en mano: desde hoy hasta que tengas tus papeles.*\n\n"
                 "Empecemos verificando si cumples los requisitos básicos.\n\n"
                 "Para empezar, indícanos tu país de origen:",
                 parse_mode=ParseMode.MARKDOWN,
@@ -2967,10 +2970,15 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "Somos un equipo de abogados especializados en extranjería respaldados "
         "por *Pombo & Horowitz Abogados*. Ya hemos ayudado a cientos de personas "
         "como tú a preparar su documentación.\n\n"
-        "✅ Te guiamos paso a paso\n"
-        "✅ Revisamos cada documento\n"
+        "*Nuestro servicio completo incluye:*\n\n"
+        "✅ Te guiamos paso a paso en todo el proceso\n"
+        "✅ Revisamos y verificamos cada documento\n"
         "✅ Preparamos tu expediente completo\n"
-        "✅ Presentamos tu solicitud cuando abra el plazo\n\n"
+        "✅ Presentamos tu solicitud en abril-junio\n"
+        "✅ Hacemos seguimiento con la administración\n"
+        "✅ Gestionamos recursos si fuera necesario\n"
+        "✅ Te entregamos tu resolución favorable\n\n"
+        "*Servicio completo, llave en mano, hasta el éxito.*\n\n"
         "El proceso es 100% por este chat. Sin citas, sin colas, sin complicaciones.\n\n"
         "📅 El plazo de solicitudes abre en abril y cierra el *30 de junio de 2026*.\n\n"
         "Empecemos verificando si cumples los requisitos básicos...\n\n"
@@ -3312,8 +3320,8 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "Presentación: 100% online.\n\n"
         "El siguiente paso es preparar su documentación. "
         "Puede empezar ahora mismo — es completamente gratuito.\n\n"
-        f"Tu código: `{code}`\n"
-        "Tus amigos reciben €25 de descuento. Cuando pagues tu primera fase, tú también ganas €25 por cada amigo.",
+        f"💡 *Tu código personal:* `{code}`\n"
+        "_Guárdalo — más info en \"Invitar amigos\" del menú._",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Ver qué documentos necesito", callback_data="fq_documentos_necesarios")],
