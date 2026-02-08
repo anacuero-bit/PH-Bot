@@ -292,7 +292,7 @@ PRICING = {
     "prepay_discount": 45,
     "prepay_total": 254,
     # Extra services
-    "antecedentes_spain": 15,      # Spain criminal record (we handle Cl@ve)
+    "antecedentes_spain": 29,      # Spain criminal record (we handle Cl@ve)
     "antecedentes_foreign": 49,    # Foreign certificate + apostille + translation
     "govt_fees_service": 29,       # We handle 790 tax form payments
     "translation_per_doc": 35,     # Sworn translation per document
@@ -3479,15 +3479,9 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                 f"🎉 ¡Código aplicado! Tienes *€{PRICING['referral_discount']} de descuento* en tu primer pago.\n\n"
                 "🇪🇸 *¡Bienvenido/a a tuspapeles2026!*\n\n"
                 "Esta plataforma ha sido desarrollada por los abogados de "
-                "*Pombo, Horowitz & Espinosa* para optimizar el proceso de regularización, "
-                "reduciendo el riesgo de error humano y de peticiones denegadas.\n\n"
-                "🎯 *¿Por qué somos diferentes?*\n\n"
-                "• *Experiencia 2005:* Participamos en la última regularización.\n"
-                "• *Tecnología:* Automatizamos lo repetitivo para enfocarnos en TU caso.\n"
-                "• *Personalización:* Cada expediente es único.\n\n"
-                f"📊 Servicio premium a precio competitivo: €{PRICING['total_phases']} "
-                f"(o €{PRICING['prepay_total']} pagando de una vez).\n"
-                "Otros cobran €389+ por un proceso genérico.\n\n"
+                "*Pombo, Horowitz & Espinosa* para ayudarte con la "
+                "regularización extraordinaria de 2026.\n\n"
+                "Empecemos verificando si cumples los requisitos básicos.\n\n"
                 "Para empezar, indícanos tu país de origen:",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=country_kb(),
@@ -3501,27 +3495,15 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "La regularización extraordinaria de 2026 es una oportunidad histórica, "
         "y estamos aquí para ayudarte a aprovecharla.\n\n"
         "Esta plataforma ha sido desarrollada por los abogados de "
-        "*Pombo, Horowitz & Espinosa* para optimizar el proceso de regularización, "
-        "reduciendo el riesgo de error humano y de peticiones denegadas.\n\n"
-        "🎯 *¿Por qué somos diferentes?*\n\n"
-        "• *Experiencia 2005:* Participamos en la última regularización. Sabemos qué funciona.\n"
-        "• *Tecnología:* Automatizamos lo repetitivo para enfocarnos en TU caso.\n"
-        "• *Personalización:* No usamos plantillas. Cada expediente es único.\n\n"
-        f"📊 *Resultado:* Servicio premium a precio competitivo.\n"
-        f"€{PRICING['total_phases']} todo incluido (o €{PRICING['prepay_total']} si pagas de una vez).\n"
-        "Otros cobran €389+ por un proceso genérico.\n\n"
-        "*Nuestro servicio completo incluye:*\n\n"
-        "✅ Te guiamos paso a paso en todo el proceso\n"
-        "✅ Revisamos y verificamos cada documento\n"
-        "✅ Preparamos tu expediente personalizado\n"
-        "✅ Presentamos tu solicitud en abril-junio\n"
-        "✅ Hacemos seguimiento con la administración\n"
-        "✅ Gestionamos recursos si fuera necesario\n"
-        "✅ Te entregamos tu resolución favorable\n\n"
-        "El proceso es 100% por este chat. Sin citas, sin colas, sin complicaciones.\n\n"
-        "📅 El plazo de solicitudes abre en abril y cierra el *30 de junio de 2026*.\n\n"
+        "*Pombo, Horowitz & Espinosa* para ayudarte con el proceso de regularización.\n\n"
+        "✅ Te guiamos paso a paso\n"
+        "✅ Revisamos tus documentos\n"
+        "✅ Preparamos tu expediente\n"
+        "✅ Presentamos tu solicitud\n\n"
+        "💡 *Empezar es gratis.* Sin compromiso.\n\n"
+        "📅 El plazo cierra el *30 de junio de 2026*.\n\n"
         "Empecemos verificando si cumples los requisitos básicos...\n\n"
-        f"¿Tienes un código de un amigo? Si lo tienes, escríbelo ahora para €{PRICING['referral_discount']} de descuento.\n\n"
+        f"¿Tienes un código de un amigo? Escríbelo para €{PRICING['referral_discount']} de descuento.\n\n"
         "Ejemplo: `MARIA-7K2P`",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
@@ -3702,17 +3684,13 @@ async def handle_country(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     country = COUNTRIES.get(code, COUNTRIES["other"])
     update_user(update.effective_user.id, country_code=code)
 
-    # Country-specific antecedentes info (brief upsell)
+    # Info only — no upsell at this stage
     antec_info = COUNTRIES_ANTECEDENTES_INFO.get(code, {})
     antec_line = ""
     if antec_info and code != "other":
-        difficulty = antec_info.get("difficulty", "media")
-        time_est = antec_info.get("time", "2-6 semanas")
-        emoji = {"baja": "🟢", "media": "🟡", "alta": "🔴"}.get(difficulty, "🟡")
         antec_line = (
-            f"\n📜 *Antecedentes penales de {country['name']}:*\n"
-            f"{emoji} Dificultad: {difficulty.capitalize()} | ⏱️ {time_est}\n"
-            f"_Solicítalos YA — por €{PRICING['antecedentes_foreign']} nos encargamos de todo._\n"
+            f"\n📜 Necesitarás antecedentes penales de {country['name']}.\n"
+            "_Te explicaremos cómo conseguirlos más adelante._\n"
         )
 
     await q.edit_message_text(
