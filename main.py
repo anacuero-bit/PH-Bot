@@ -388,7 +388,8 @@ STRIPE_LINKS = {
     ST_PHASE2_TEXT_ANSWER,
     ST_PHASE3_QUESTIONNAIRE,
     ST_PHASE3_TEXT_ANSWER,
-) = range(26)
+    ST_WAITLIST,
+) = range(27)
 
 # =============================================================================
 # REFERRAL SYSTEM
@@ -4099,6 +4100,45 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     return ST_ELIGIBLE
 
 
+# --- Waitlist wall ---
+
+async def handle_waitlist(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Waitlist wall - blocks progress until BOE publishes."""
+    q = update.callback_query
+    if q:
+        await q.answer()
+
+    tid = update.effective_user.id
+    user = get_user(tid)
+    doc_count = get_doc_count(tid)
+    counter = get_waitlist_count()
+
+    text = (
+        "*LISTA DE ESPERA*\n\n"
+        f"Actualmente hay más de {counter:,} personas esperando.\n\n"
+        "Cuando el BOE publique el proceso oficial, "
+        "notificaremos a todos simultáneamente.\n\n"
+        "Las primeras 1.000 en completar el pago aseguran su plaza.\n\n"
+        f"Documentos aportados: {doc_count}\n\n"
+        "Mientras tanto, puedes seguir preparándote."
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
+        [InlineKeyboardButton("Ver mis documentos", callback_data="m_docs")],
+        [InlineKeyboardButton("Invitar amigos", callback_data="m_referidos")],
+        [InlineKeyboardButton("Preguntas frecuentes", callback_data="m_faq")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if q:
+        await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+    else:
+        await update.effective_message.reply_text(text, parse_mode=ParseMode.MARKDOWN, reply_markup=reply_markup)
+
+    return ST_WAITLIST
+
+
 # --- Main menu ---
 
 async def show_main_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
@@ -4160,6 +4200,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Escriba /start para comenzar de nuevo."
         )
         return ConversationHandler.END
+
+    # Waitlist state
+    if d == "waitlist" or d == "m_waitlist":
+        return await handle_waitlist(update, ctx)
 
     # Route country selection callbacks (fallback if state handler misses)
     if d.startswith("c_"):
@@ -7038,6 +7082,12 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_phase3_text_answer),
                 CallbackQueryHandler(handle_phase3_questionnaire, pattern="^p3q_"),
                 CallbackQueryHandler(handle_menu),
+            ],
+            ST_WAITLIST: [
+                CallbackQueryHandler(handle_menu),
+                MessageHandler(filters.PHOTO, handle_photo_upload),
+                MessageHandler(filters.Document.ALL, handle_file_upload),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text),
             ],
         },
         fallbacks=[
