@@ -4108,11 +4108,19 @@ async def handle_waitlist(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int
     text = (
         "*LISTA DE ESPERA*\n\n"
         f"Actualmente hay más de {counter:,} personas esperando.\n\n"
-        "Cuando el BOE publique el proceso oficial, "
-        "notificaremos a todos simultáneamente.\n\n"
-        "Las primeras 1.000 en completar el pago aseguran su plaza.\n\n"
-        f"Documentos aportados: {doc_count}\n\n"
-        "Mientras tanto, puedes seguir preparándote."
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "¿QUÉ SIGNIFICA?\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "El proceso aún no es oficial. Cuando el Gobierno publique "
+        "el Real Decreto en el BOE (previsto marzo/abril 2026), "
+        "abriremos el pago.\n\n"
+        "• Notificaremos a todos simultáneamente\n"
+        "• Las primeras 1.000 en pagar aseguran plaza\n\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "¿QUÉ PUEDES HACER AHORA?\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"• Subir documentos — tenlos listos ({doc_count} subidos)\n"
+        f"• Invitar amigos — €{PRICING['referral_credit']} descuento por cada uno"
     )
 
     keyboard = [
@@ -4202,13 +4210,16 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
              "paid2", "paid2_free", "paid3", "paid4", "request_phase2",
              "join_waitlist", "m_price"):
         text = (
-            "*LISTA DE ESPERA*\n\n"
-            "El proceso de pago aún no está disponible.\n\n"
-            "Cuando el BOE publique el proceso oficial, "
-            "notificaremos a todos simultáneamente.\n\n"
-            "Mientras tanto, puedes seguir subiendo documentos."
+            "*No disponible*\n\n"
+            "El pago aún no está abierto. Cuando el Gobierno publique "
+            "el Real Decreto en el BOE, abriremos el proceso de pago "
+            "y te notificaremos.\n\n"
+            "Mientras tanto, sigue subiendo documentos para tenerlo todo listo."
         )
-        keyboard = [[InlineKeyboardButton("Volver", callback_data="waitlist")]]
+        keyboard = [
+            [InlineKeyboardButton("Ver lista de espera", callback_data="waitlist")],
+            [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
+        ]
         await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(keyboard))
         return ST_WAITLIST
@@ -4984,28 +4995,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         u = get_user(update.effective_user.id)
 
         if is_capacity_full():
-            # CAPACITY FULL — waitlist or bypass
-            await q.edit_message_text(
-                f"📊 *Has subido {dc} documentos. Buen trabajo.*\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "⏳ LISTA DE ESPERA\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"Hemos alcanzado nuestra capacidad de {TOTAL_CAPACITY} casos "
-                "para garantizar atención personalizada.\n\n"
-                "*Tus documentos están guardados.*\n\n"
-                "Tienes 2 opciones:\n\n"
-                "1️⃣ *Apuntarte a la lista de espera*\n"
-                "   Te avisamos cuando haya plaza. Sin coste.\n\n"
-                f"2️⃣ *Reservar tu plaza ahora — €{PREPAY_BYPASS_PRICE}*\n"
-                "   Pago único. Todo incluido hasta la resolución.\n"
-                "   Empiezas mañana. Ahorras €48.",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(f"Reservar plaza — €{PREPAY_BYPASS_PRICE}", callback_data="pay_bypass")],
-                    [InlineKeyboardButton("Apuntarme a la lista", callback_data="join_waitlist")],
-                    [InlineKeyboardButton("Seguir subiendo docs", callback_data="m_upload")],
-                ]))
-            return ST_MAIN_MENU
+            # CAPACITY FULL — redirect to waitlist
+            return await handle_waitlist(update, ctx)
 
         # SLOTS AVAILABLE — normal Phase 2 pitch
         available = get_available_slots()
