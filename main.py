@@ -3047,18 +3047,8 @@ def main_menu_kb(user: Dict) -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📋 Mi checklist de documentos", callback_data="m_checklist")],
         [InlineKeyboardButton(f"📄 Mis documentos ({dc})", callback_data="m_docs")],
         [InlineKeyboardButton("📤 Subir documento", callback_data="m_upload")],
-    ]
-    # Payment progression: Phase 2 → Phase 3 → Phase 4
-    if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
-        btns.append([InlineKeyboardButton("🔓 Revisión legal — €39", callback_data="m_pay2")])
-    elif user.get("phase2_paid") and not user.get("phase3_paid") and user.get("docs_verified"):
-        btns.append([InlineKeyboardButton("🔓 Procesamiento — €150", callback_data="m_pay3")])
-    elif user.get("phase3_paid") and not user.get("phase4_paid") and user.get("expediente_ready"):
-        btns.append([InlineKeyboardButton("🔓 Presentación — €110", callback_data="m_pay4")])
-    btns += [
-        [InlineKeyboardButton("📣 Invitar amigos", callback_data="m_referidos"),
-         InlineKeyboardButton("👥 Mis referidos", callback_data="m_referidos")],
-        [InlineKeyboardButton("💰 Costos y pagos", callback_data="m_price")],
+        [InlineKeyboardButton("Ver lista de espera", callback_data="waitlist")],
+        [InlineKeyboardButton("📣 Invitar amigos", callback_data="m_referidos")],
         [InlineKeyboardButton("❓ Preguntas frecuentes", callback_data="m_faq")],
         [InlineKeyboardButton("💬 Consultar con abogado", callback_data="m_contact")],
     ]
@@ -4079,22 +4069,19 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     else:
         code = user['referral_code']
 
-    cap_msg = get_capacity_message()
+    counter = get_waitlist_count()
     await q.edit_message_text(
-        f"✅ *¡Buenas noticias, {name}!*\n\n"
-        "Según tus respuestas, cumples los requisitos básicos para la "
-        "regularización extraordinaria de 2026.\n\n"
-        f"{cap_msg}\n\n"
+        f"*{name}, cumples los requisitos.*\n\n"
         f"Expediente: *{case['case_number']}*\n"
         f"Plazo: 1 abril — 30 junio 2026 ({days_left()} días)\n\n"
-        "📤 *Siguiente paso:* Sube tus documentos\n\n"
-        "Sin prisa. Sin compromiso.\n"
-        "💡 *Fase 1 es 100% gratis.*",
+        f"Actualmente hay más de {counter:,} personas en lista de espera.\n\n"
+        "*Siguiente paso:* sube tus documentos para adelantar tu posición.\n\n"
+        "Subir documentos es gratuito.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📤 Subir documentos", callback_data="m_upload")],
-            [InlineKeyboardButton("📋 Ver documentos válidos", callback_data="m_checklist")],
-            [InlineKeyboardButton("❓ Tengo preguntas", callback_data="m_faq")],
+            [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
+            [InlineKeyboardButton("Ver lista de espera", callback_data="waitlist")],
+            [InlineKeyboardButton("Preguntas frecuentes", callback_data="m_faq")],
         ]),
     )
     return ST_ELIGIBLE
@@ -4204,6 +4191,22 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     # Waitlist state
     if d == "waitlist" or d == "m_waitlist":
         return await handle_waitlist(update, ctx)
+
+    # Block all payment paths → redirect to waitlist wall
+    if d in ("m_pay2", "m_pay3", "m_pay4", "pay_full", "pay_bypass",
+             "paid2", "paid2_free", "paid3", "paid4", "request_phase2",
+             "join_waitlist", "m_price"):
+        text = (
+            "*LISTA DE ESPERA*\n\n"
+            "El proceso de pago aún no está disponible.\n\n"
+            "Cuando el BOE publique el proceso oficial, "
+            "notificaremos a todos simultáneamente.\n\n"
+            "Mientras tanto, puedes seguir subiendo documentos."
+        )
+        keyboard = [[InlineKeyboardButton("Volver", callback_data="waitlist")]]
+        await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(keyboard))
+        return ST_WAITLIST
 
     # Route country selection callbacks (fallback if state handler misses)
     if d.startswith("c_"):
@@ -5439,28 +5442,16 @@ async def handle_photo_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) ->
     dc = get_doc_count(tid)
     user = get_user(tid)
 
-    # Build response buttons based on doc count and phase
+    # Post-upload response — direct to waitlist
     response_btns = [
-        [InlineKeyboardButton("📤 Subir otro documento", callback_data="m_upload")],
+        [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
+        [InlineKeyboardButton("Ver lista de espera", callback_data="waitlist")],
     ]
-    unlock = ""
-    if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
-        unlock = f"\n\n🎉 Ya puedes solicitar tu *auditoría personalizada* (€{PRICING['phase2']})."
-        response_btns.append([InlineKeyboardButton(f"⚖️ Solicitar auditoría (€{PRICING['phase2']})", callback_data="request_phase2")])
-
-    share_hint = ""
-    if dc >= 3:
-        share_hint = f"\n\n💡 ¿Conoces a alguien en tu misma situación? Invítalo y gana €{PRICING['referral_credit']} de crédito."
-
-    response_btns.append([InlineKeyboardButton("📋 Ver mis documentos", callback_data="m_docs")])
-    response_btns.append([InlineKeyboardButton("← Menú", callback_data="back")])
 
     await update.message.reply_text(
-        f"✅ *¡Documento recibido!*\n\n"
-        f"📄 {info['name']}\n"
-        f"📊 Total documentos: {dc}\n\n"
-        f"Puedes seguir subiendo más documentos o, cuando estés listo, "
-        f"solicitar tu auditoría personalizada.{unlock}{share_hint}",
+        f"*Documento guardado.*\n\n"
+        f"Documentos aportados: {dc}\n\n"
+        "Puedes seguir subiendo documentos o ver tu posición en la lista de espera.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(response_btns),
     )
@@ -5517,27 +5508,16 @@ async def handle_file_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
     dc = get_doc_count(tid)
     user = get_user(tid)
 
+    # Post-upload response — direct to waitlist
     response_btns2 = [
-        [InlineKeyboardButton("📤 Subir otro documento", callback_data="m_upload")],
+        [InlineKeyboardButton("Subir otro documento", callback_data="m_upload")],
+        [InlineKeyboardButton("Ver lista de espera", callback_data="waitlist")],
     ]
-    unlock = ""
-    if dc >= MIN_DOCS_FOR_PHASE2 and not user.get("phase2_paid"):
-        unlock = f"\n\n🎉 Ya puedes solicitar tu *auditoría personalizada* (€{PRICING['phase2']})."
-        response_btns2.append([InlineKeyboardButton(f"⚖️ Solicitar auditoría (€{PRICING['phase2']})", callback_data="request_phase2")])
-
-    share_hint = ""
-    if dc >= 3:
-        share_hint = f"\n\n💡 ¿Conoces a alguien en tu misma situación? Invítalo y gana €{PRICING['referral_credit']} de crédito."
-
-    response_btns2.append([InlineKeyboardButton("📋 Ver mis documentos", callback_data="m_docs")])
-    response_btns2.append([InlineKeyboardButton("← Menú", callback_data="back")])
 
     await update.message.reply_text(
-        f"✅ *¡Documento recibido!*\n\n"
-        f"📄 {info['name']}\n"
-        f"📊 Total documentos: {dc}\n\n"
-        f"Puedes seguir subiendo más documentos o, cuando estés listo, "
-        f"solicitar tu auditoría personalizada.{unlock}{share_hint}",
+        f"*Documento guardado.*\n\n"
+        f"Documentos aportados: {dc}\n\n"
+        "Puedes seguir subiendo documentos o ver tu posición en la lista de espera.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(response_btns2),
     )
