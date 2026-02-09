@@ -292,7 +292,7 @@ MIN_DOCS_FOR_PHASE2 = 3
 # MVP Launch Config
 TOTAL_CAPACITY = 1000
 BOE_PUBLISHED = False  # Flip to True when BOE publishes and payments open
-PREPAY_BYPASS_PRICE = 199
+PREPAY_BYPASS_PRICE = 197
 
 
 def is_payments_enabled() -> bool:
@@ -324,7 +324,7 @@ PRICING = {
     "phase4": 99,      # Submission + tracking
     "total_phases": 197,
     "prepay_discount": 0,
-    "prepay_total": 199,
+    "prepay_total": 197,
     # Extra services
     "antecedentes_spain": 29,      # Spain criminal record (we handle Cl@ve)
     "antecedentes_foreign": 49,    # Foreign certificate + apostille + translation
@@ -340,7 +340,7 @@ PRICING = {
     # Referral
     "referral_discount": 25,
     "referral_credit": 25,
-    "referral_max": 299,
+    "referral_max": 197,
 }
 
 # Stripe payment links (env vars — set in Railway)
@@ -948,7 +948,7 @@ PRICING_EXPLANATION = (
     "💳 OPCIONES DE PAGO\n"
     "━━━━━━━━━━━━━━━━━━━━\n\n"
     "*Opción 1: Pago por fases*\n"
-    f"• Fase 2 (auditoría): €{PRICING['phase2']}\n"
+    f"• Fase 2 (evaluación): €{PRICING['phase2']}\n"
     f"• Fase 3 (expediente): €{PRICING['phase3']}\n"
     f"• Fase 4 (presentación): €{PRICING['phase4']}\n"
     f"• *Total: €{PRICING['total_phases']}*\n\n"
@@ -1332,9 +1332,9 @@ FAQ = {
         "text": (
             "*¿Qué incluye cada fase de pago?*\n\n"
             "*Fase 1 (GRATIS):* Verificación de elegibilidad + subir documentos.\n"
-            "*Fase 2 (€39):* Revisión legal completa.\n"
-            "*Fase 3 (€150):* Preparación del expediente.\n"
-            "*Fase 4 (€110):* Presentación y seguimiento."
+            f"*Fase 2 (€{PRICING['phase2']}):* Revisión legal completa.\n"
+            f"*Fase 3 (€{PRICING['phase3']}):* Preparación del expediente.\n"
+            f"*Fase 4 (€{PRICING['phase4']}):* Presentación y seguimiento."
         ),
     },
 
@@ -1443,7 +1443,7 @@ FAQ = {
             "*¿Por qué tantas preguntas?*\n\n"
             "Cada pregunta tiene un propósito legal concreto:\n\n"
             "• Las de *Fase 2* nos permiten evaluar la solidez de tu caso "
-            "y generar un informe de auditoría personalizado.\n"
+            "y generar un informe de evaluación personalizado.\n"
             "• Las de *Fase 3* van directamente a los formularios oficiales "
             "que se presentan ante Extranjería.\n\n"
             "Un expediente incompleto o con errores se deniega. "
@@ -1477,7 +1477,7 @@ FAQ = {
             "• Un solo día sin prueba de permanencia puede hacer que te denieguen.\n"
             "• Los formularios oficiales tienen campos técnicos que confunden.\n"
             "• Si te deniegan, no puedes volver a presentar — se acabó.\n\n"
-            "Nuestro servicio cuesta €299 (o €254 con prepago). "
+            f"Nuestro servicio cuesta *€{PRICING['prepay_total']}*. "
             "Una denegación te cuesta *tu oportunidad de regularizarte*.\n\n"
             "Fase 1 es gratis — prueba sin compromiso."
         ),
@@ -1495,7 +1495,7 @@ FAQ = {
             "*Para ti:*\n"
             "Cuando tu amigo pague Fase 3, ganas €25 de crédito "
             "que se aplica a tus siguientes pagos.\n\n"
-            "Máximo: €299 en créditos (12 amigos = servicio gratis).\n\n"
+            f"Máximo: €{PRICING['referral_max']} en créditos (8 amigos = servicio gratis).\n\n"
             "Puedes ver tu código y estadísticas con el comando /referidos."
         ),
     },
@@ -2751,11 +2751,11 @@ def referral_share_keyboard(code: str) -> InlineKeyboardMarkup:
     tg_url = get_telegram_share_url(code)
     fb_url = get_facebook_share_url(code)
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📱 WhatsApp", url=wa_url),
-         InlineKeyboardButton("📲 Telegram", url=tg_url)],
-        [InlineKeyboardButton("📘 Facebook", url=fb_url),
-         InlineKeyboardButton("📋 Copiar", callback_data=f"copy_ref_{code}")],
-        [InlineKeyboardButton("← Volver", callback_data="back")],
+        [InlineKeyboardButton("WhatsApp", url=wa_url),
+         InlineKeyboardButton("Telegram", url=tg_url)],
+        [InlineKeyboardButton("Facebook", url=fb_url),
+         InlineKeyboardButton("Copiar", callback_data=f"copy_ref_{code}")],
+        [InlineKeyboardButton("Volver", callback_data="back")],
     ])
 
 
@@ -2765,10 +2765,10 @@ def get_share_buttons(code: str) -> list:
     tg_url = get_telegram_share_url(code)
     fb_url = get_facebook_share_url(code)
     return [
-        [InlineKeyboardButton("📱 WhatsApp", url=wa_url),
-         InlineKeyboardButton("📲 Telegram", url=tg_url)],
-        [InlineKeyboardButton("📘 Facebook", url=fb_url),
-         InlineKeyboardButton("📋 Copiar", callback_data=f"copy_ref_{code}")],
+        [InlineKeyboardButton("WhatsApp", url=wa_url),
+         InlineKeyboardButton("Telegram", url=tg_url)],
+        [InlineKeyboardButton("Facebook", url=fb_url),
+         InlineKeyboardButton("Copiar", callback_data=f"copy_ref_{code}")],
     ]
 
 
@@ -2807,7 +2807,7 @@ def build_referidos_text(stats: dict) -> str:
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "Cada vez que un amigo pague usando tu código, ganas €25 de crédito "
             "que se aplica automáticamente a tus próximos pagos.\n\n"
-            "🎯 *Con 12 amigos = tu servicio completo es GRATIS*\n\n"
+            "*Con 8 amigos = tu servicio completo es GRATIS*\n\n"
             "¡Comparte ahora!"
         )
     else:
@@ -2815,15 +2815,15 @@ def build_referidos_text(stats: dict) -> str:
             "━━━━━━━━━━━━━━━━━━━━\n"
             "🔓 ACTIVAR TUS GANANCIAS\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Para empezar a ganar créditos, primero debes pagar tu Fase 2 (€39).\n\n"
+            f"Para empezar a ganar créditos, primero debes pagar tu Fase 2 (€{PRICING['phase2']}).\n\n"
             "*¿Por qué?* Queremos asegurar que solo usuarios comprometidos con el "
             "proceso puedan ganar créditos. Esto evita fraudes y garantiza un sistema "
             "justo para todos.\n\n"
-            "Una vez pagues tu €39:\n"
+            f"Una vez pagues tu €{PRICING['phase2']}:\n"
             "• Tu código se activa permanentemente\n"
             "• Empiezas a ganar €25 por cada amigo que pague\n"
-            "• Puedes acumular hasta €299 en créditos (¡servicio completo gratis!)\n\n"
-            "🎯 *Con 12 amigos = tu servicio completo es GRATIS*"
+            f"• Puedes acumular hasta €{PRICING['referral_max']} en créditos (¡servicio completo gratis!)\n\n"
+            "*Con 8 amigos = tu servicio completo es GRATIS*"
         )
 
     text = (
@@ -3036,21 +3036,21 @@ def country_kb() -> InlineKeyboardMarkup:
 def doc_type_kb() -> InlineKeyboardMarkup:
     buttons = []
     for code, d in DOC_TYPES.items():
-        buttons.append([InlineKeyboardButton(f"{d['icon']} {d['name']}", callback_data=f"dt_{code}")])
-    buttons.append([InlineKeyboardButton("← Volver al menú", callback_data="back")])
+        buttons.append([InlineKeyboardButton(d['name'], callback_data=f"dt_{code}")])
+    buttons.append([InlineKeyboardButton("Volver al menu", callback_data="back")])
     return InlineKeyboardMarkup(buttons)
 
 
 def main_menu_kb(user: Dict) -> InlineKeyboardMarkup:
     dc = get_doc_count(user["telegram_id"])
     btns = [
-        [InlineKeyboardButton("📋 Mi checklist de documentos", callback_data="m_checklist")],
-        [InlineKeyboardButton(f"📄 Mis documentos ({dc})", callback_data="m_docs")],
-        [InlineKeyboardButton("📤 Subir documento", callback_data="m_upload")],
+        [InlineKeyboardButton("Mi checklist de documentos", callback_data="m_checklist")],
+        [InlineKeyboardButton(f"Mis documentos ({dc})", callback_data="m_docs")],
+        [InlineKeyboardButton("Subir documento", callback_data="m_upload")],
         [InlineKeyboardButton("Ver lista de espera", callback_data="waitlist")],
-        [InlineKeyboardButton("📣 Invitar amigos", callback_data="m_referidos")],
-        [InlineKeyboardButton("❓ Preguntas frecuentes", callback_data="m_faq")],
-        [InlineKeyboardButton("💬 Consultar con abogado", callback_data="m_contact")],
+        [InlineKeyboardButton("Invitar amigos", callback_data="m_referidos")],
+        [InlineKeyboardButton("Preguntas frecuentes", callback_data="m_faq")],
+        [InlineKeyboardButton("Consultar con abogado", callback_data="m_contact")],
     ]
     return InlineKeyboardMarkup(btns)
 
@@ -3060,7 +3060,7 @@ def faq_menu_kb() -> InlineKeyboardMarkup:
     btns = []
     for cat_key, cat in FAQ_CATEGORIES.items():
         btns.append([InlineKeyboardButton(cat["title"], callback_data=f"fcat_{cat_key}")])
-    btns.append([InlineKeyboardButton("← Volver al menú", callback_data="back")])
+    btns.append([InlineKeyboardButton("Volver al menu", callback_data="back")])
     return InlineKeyboardMarkup(btns)
 
 
@@ -3072,8 +3072,8 @@ def faq_category_kb(cat_key: str) -> InlineKeyboardMarkup:
         faq = FAQ.get(faq_key)
         if faq:
             btns.append([InlineKeyboardButton(faq["title"], callback_data=f"fq_{faq_key}")])
-    btns.append([InlineKeyboardButton("← Todas las categorías", callback_data="m_faq")])
-    btns.append([InlineKeyboardButton("← Menú principal", callback_data="back")])
+    btns.append([InlineKeyboardButton("Todas las categorias", callback_data="m_faq")])
+    btns.append([InlineKeyboardButton("Menu principal", callback_data="back")])
     return InlineKeyboardMarkup(btns)
 
 
@@ -3093,11 +3093,11 @@ def _payment_buttons(paid_callback: str, stripe_link: str = "") -> InlineKeyboar
     """Build payment buttons with optional Stripe link."""
     btns = []
     if stripe_link:
-        btns.append([InlineKeyboardButton("💳 Pagar con tarjeta", url=stripe_link)])
+        btns.append([InlineKeyboardButton("Pagar con tarjeta", url=stripe_link)])
     btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
     btns.append([InlineKeyboardButton("Ya he realizado el pago", callback_data=paid_callback)])
     btns.append([InlineKeyboardButton("Tengo dudas", callback_data="m_contact")])
-    btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
+    btns.append([InlineKeyboardButton("Volver", callback_data="back")])
     return InlineKeyboardMarkup(btns)
 
 
@@ -3107,16 +3107,16 @@ def docs_ready_payment_kb(has_referral_discount: bool = False) -> InlineKeyboard
     phase2_price = PRICING["phase2"] - PRICING["referral_discount"] if has_referral_discount else PRICING["phase2"]
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(
-            f"⭐ Pagar TODO — €{prepay_price} (ahorra €{PRICING['prepay_discount']})",
+            f"Pagar TODO — €{prepay_price} (ahorra €{PRICING['prepay_discount']})",
             callback_data="pay_full")],
         [InlineKeyboardButton(
-            f"⚖️ Auditoría personalizada — €{phase2_price}",
+            f"Evaluacion personalizada — €{phase2_price}",
             callback_data="m_pay2")],
         [InlineKeyboardButton(
-            "📤 Subir más documentos",
+            "Subir mas documentos",
             callback_data="m_upload")],
-        [InlineKeyboardButton("❓ ¿Por qué estos precios?", callback_data="faq_pricing")],
-        [InlineKeyboardButton("← Menú", callback_data="back")],
+        [InlineKeyboardButton("¿Por que estos precios?", callback_data="faq_pricing")],
+        [InlineKeyboardButton("Menu", callback_data="back")],
     ])
 
 
@@ -3223,7 +3223,7 @@ PHASE2_PITCH = (
     "📊 *Has subido {{doc_count}} documentos. Buen trabajo.*\n\n"
     "Ahora viene la parte importante: *entender TU caso*.\n\n"
     "━━━━━━━━━━━━━━━━━━━━\n"
-    f"⚖️ AUDITORÍA PERSONALIZADA — €{PRICING['phase2']}\n"
+    f"EVALUACIÓN PERSONALIZADA — €{PRICING['phase2']}\n"
     "━━━━━━━━━━━━━━━━━━━━\n\n"
     "No vamos a darte un checklist genérico.\n"
     "Vamos a:\n\n"
@@ -3237,7 +3237,7 @@ PHASE2_PITCH = (
     "━━━━━━━━━━━━━━━━━━━━\n\n"
     f"💡 *¿Por qué €{PRICING['phase2']}?*\n"
     f"Otros cobran €{PRICING['phase2']} por un formulario genérico.\n"
-    "Nosotros te damos una auditoría real porque ya tenemos tus documentos.\n\n"
+    "Nosotros te damos una evaluación real porque ya tenemos tus documentos.\n\n"
     "⭐ *¿Prefieres pagar todo de una vez?*\n"
     f"Por €{PRICING['prepay_total']} tienes TODO el servicio hasta la resolución.\n"
     f"Ahorras €{PRICING['prepay_discount']} y te olvidas de pagos."
@@ -3267,11 +3267,11 @@ VIP_BUNDLE_OFFER = (
     f"PAQUETE VIP — €{PRICING['vip_bundle']}\n"
     "━━━━━━━━━━━━━━━━━━━━\n\n"
     "Todo incluido:\n"
-    "✅ Auditoría personalizada (Fase 2)\n"
-    "✅ Expediente a medida (Fase 3)\n"
-    "✅ Presentación y seguimiento (Fase 4)\n"
-    "✅ Antecedentes España tramitados\n"
-    "✅ Gestión de tasas gubernamentales\n\n"
+    "Evaluación personalizada (Fase 2)\n"
+    "Expediente a medida (Fase 3)\n"
+    "Presentación y seguimiento (Fase 4)\n"
+    "Antecedentes España tramitados\n"
+    "Gestión de tasas gubernamentales\n\n"
     f"*Precio normal:* €{PRICING['phase2']} + €{PRICING['phase3']} + €{PRICING['phase4']} + "
     f"€{PRICING['antecedentes_spain']} + €{PRICING['govt_fees_service']} = "
     f"€{PRICING['phase2'] + PRICING['phase3'] + PRICING['phase4'] + PRICING['antecedentes_spain'] + PRICING['govt_fees_service']}\n"
@@ -3377,52 +3377,52 @@ FAQ_PROOF_DOCUMENTS_FULL = (
 def antecedentes_service_kb() -> InlineKeyboardMarkup:
     """Buttons for foreign antecedentes service offer."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"📩 Sí, quiero ayuda — €{PRICING['antecedentes_foreign']}", callback_data="buy_antecedentes")],
-        [InlineKeyboardButton("📋 Lo hago yo mismo", callback_data="back")],
+        [InlineKeyboardButton(f"Si, quiero ayuda — €{PRICING['antecedentes_foreign']}", callback_data="buy_antecedentes")],
+        [InlineKeyboardButton("Lo hago yo mismo", callback_data="back")],
     ])
 
 
 def antecedentes_help_kb() -> InlineKeyboardMarkup:
     """Buttons for antecedentes help — request support flow."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🌍 Antecedentes país de origen — €{PRICING['antecedentes_foreign']}", callback_data="request_antecedentes_help")],
-        [InlineKeyboardButton(f"📜 Antecedentes España — €{PRICING['antecedentes_spain']}", callback_data="upsell_antec_spain")],
-        [InlineKeyboardButton("📋 Lo gestiono yo mismo", callback_data="m_checklist")],
-        [InlineKeyboardButton("← Menú", callback_data="back")],
+        [InlineKeyboardButton(f"Antecedentes pais de origen — €{PRICING['antecedentes_foreign']}", callback_data="request_antecedentes_help")],
+        [InlineKeyboardButton(f"Antecedentes España — €{PRICING['antecedentes_spain']}", callback_data="upsell_antec_spain")],
+        [InlineKeyboardButton("Lo gestiono yo mismo", callback_data="m_checklist")],
+        [InlineKeyboardButton("Menu", callback_data="back")],
     ])
 
 
 def antecedentes_spain_kb() -> InlineKeyboardMarkup:
     """Buttons for Spain antecedentes upsell."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"✅ Sí, tramitadlo — €{PRICING['antecedentes_spain']}", callback_data="buy_antec_spain")],
-        [InlineKeyboardButton("📋 Lo hago yo mismo", callback_data="diy_antec_spain")],
-        [InlineKeyboardButton("← Volver", callback_data="antecedentes_help")],
+        [InlineKeyboardButton(f"Si, tramitadlo — €{PRICING['antecedentes_spain']}", callback_data="buy_antec_spain")],
+        [InlineKeyboardButton("Lo hago yo mismo", callback_data="diy_antec_spain")],
+        [InlineKeyboardButton("Volver", callback_data="antecedentes_help")],
     ])
 
 
 def govt_fees_service_kb() -> InlineKeyboardMarkup:
     """Buttons for government fees service offer."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"✅ Sí, gestionadlo — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
-        [InlineKeyboardButton("📋 Las pago yo mismo", callback_data="back")],
-        [InlineKeyboardButton("❓ ¿Cómo se pagan?", callback_data="explain_govt_fees")],
+        [InlineKeyboardButton(f"Si, gestionadlo — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
+        [InlineKeyboardButton("Las pago yo mismo", callback_data="back")],
+        [InlineKeyboardButton("¿Como se pagan?", callback_data="explain_govt_fees")],
     ])
 
 
 def translation_service_kb() -> InlineKeyboardMarkup:
     """Buttons for translation service upsell."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"✅ Traducir documento — €{PRICING['translation_per_doc']}", callback_data="buy_translation")],
-        [InlineKeyboardButton("📋 Ya tengo traductor", callback_data="back")],
+        [InlineKeyboardButton(f"Traducir documento — €{PRICING['translation_per_doc']}", callback_data="buy_translation")],
+        [InlineKeyboardButton("Ya tengo traductor", callback_data="back")],
     ])
 
 
 def phase4_bundle_kb() -> InlineKeyboardMarkup:
     """Buttons for Phase 4 bundle offer."""
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"📦 Paquete completo — €{PRICING['phase4_bundle']}", callback_data="buy_phase4_bundle")],
-        [InlineKeyboardButton(f"📤 Solo Fase 4 — €{PRICING['phase4']}", callback_data="m_pay4")],
+        [InlineKeyboardButton(f"Paquete completo — €{PRICING['phase4_bundle']}", callback_data="buy_phase4_bundle")],
+        [InlineKeyboardButton(f"Solo Fase 4 — €{PRICING['phase4']}", callback_data="m_pay4")],
     ])
 
 
@@ -3430,9 +3430,9 @@ def vip_bundle_kb(has_referral: bool = False) -> InlineKeyboardMarkup:
     """Buttons for VIP bundle offer."""
     price = PRICING['vip_bundle'] - PRICING['referral_discount'] if has_referral else PRICING['vip_bundle']
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"⭐ Paquete VIP — €{price}", callback_data="buy_vip_bundle")],
-        [InlineKeyboardButton(f"⚖️ Solo auditoría — €{PRICING['phase2']}", callback_data="m_pay2")],
-        [InlineKeyboardButton("❓ ¿Qué incluye?", callback_data="faq_pricing")],
+        [InlineKeyboardButton(f"Paquete VIP — €{price}", callback_data="buy_vip_bundle")],
+        [InlineKeyboardButton(f"Solo evaluacion — €{PRICING['phase2']}", callback_data="m_pay2")],
+        [InlineKeyboardButton("¿Que incluye?", callback_data="faq_pricing")],
     ])
 
 
@@ -3489,7 +3489,7 @@ def build_question_keyboard(question: Dict) -> InlineKeyboardMarkup:
         btns = []
         for label, value in question.get("options", []):
             btns.append([InlineKeyboardButton(label, callback_data=f"p2q_{question['id']}_{value}")])
-        btns.append([InlineKeyboardButton("⏭️ Saltar", callback_data=f"p2q_{question['id']}_skip")])
+        btns.append([InlineKeyboardButton("Saltar", callback_data=f"p2q_{question['id']}_skip")])
         return InlineKeyboardMarkup(btns)
     return None
 
@@ -3603,7 +3603,7 @@ def generate_phase2_report(user: Dict, answers: Dict) -> str:
     doc_count = get_doc_count(user["telegram_id"])
 
     report = (
-        "📊 *INFORME DE AUDITORÍA PERSONALIZADA*\n"
+        "*INFORME DE EVALUACIÓN PERSONALIZADA*\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"👤 *{name}*\n"
         f"🌍 {country['flag']} {country['name']}\n"
@@ -3872,7 +3872,7 @@ def build_p3_question_keyboard(question: Dict) -> InlineKeyboardMarkup:
         for label, value in question.get("options", []):
             btns.append([InlineKeyboardButton(label, callback_data=f"p3q_{question['id']}_{value}")])
         if not question.get("required"):
-            btns.append([InlineKeyboardButton("⏭️ Saltar", callback_data=f"p3q_{question['id']}_skip")])
+            btns.append([InlineKeyboardButton("Saltar", callback_data=f"p3q_{question['id']}_skip")])
         return InlineKeyboardMarkup(btns)
     return None
 
@@ -4235,9 +4235,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                           "sin_empadronamiento", "documentos_otro_nombre"}
             btns = []
             if key in proof_keys:
-                btns.append([InlineKeyboardButton("📋 Ver 40+ documentos válidos", callback_data="proof_docs_full")])
-            btns.append([InlineKeyboardButton("📋 Todas las categorías", callback_data="m_faq")])
-            btns.append([InlineKeyboardButton("← Menú principal", callback_data="back")])
+                btns.append([InlineKeyboardButton("Ver 40+ documentos validos", callback_data="proof_docs_full")])
+            btns.append([InlineKeyboardButton("Todas las categorias", callback_data="m_faq")])
+            btns.append([InlineKeyboardButton("Menu principal", callback_data="back")])
             await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup(btns))
             return ST_FAQ_ITEM
@@ -4266,10 +4266,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"{checklist}",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📄 Subir documentos", callback_data="m_upload")],
-                [InlineKeyboardButton("📋 Ver 40+ documentos válidos", callback_data="proof_docs_full")],
-                [InlineKeyboardButton("🌍 Ayuda con antecedentes", callback_data="antecedentes_help")],
-                [InlineKeyboardButton("← Volver al menú", callback_data="back")],
+                [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
+                [InlineKeyboardButton("Ver 40+ documentos validos", callback_data="proof_docs_full")],
+                [InlineKeyboardButton("Ayuda con antecedentes", callback_data="antecedentes_help")],
+                [InlineKeyboardButton("Volver al menu", callback_data="back")],
             ]))
         return ST_MAIN_MENU
 
@@ -4286,8 +4286,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                 text += f"{icon} {info['icon']} {info['name']}{score_text}\n"
         await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📤 Subir documento", callback_data="m_upload")],
-                [InlineKeyboardButton("← Volver", callback_data="back")],
+                [InlineKeyboardButton("Subir documento", callback_data="m_upload")],
+                [InlineKeyboardButton("Volver", callback_data="back")],
             ]))
         return ST_DOCS_LIST
 
@@ -4324,7 +4324,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "- Texto legible.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("← Cancelar", callback_data="m_upload")],
+                [InlineKeyboardButton("Cancelar", callback_data="m_upload")],
             ]))
         return ST_UPLOAD_PHOTO
 
@@ -4345,17 +4345,17 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "- Texto legible.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("← Cancelar", callback_data="m_upload")],
+                [InlineKeyboardButton("Cancelar", callback_data="m_upload")],
             ]))
         return ST_UPLOAD_PHOTO
 
     if d == "m_price":
         await q.edit_message_text(PRICING_EXPLANATION, parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"⭐ Pagar TODO — €{PRICING['prepay_total']}", callback_data="pay_full")],
-                [InlineKeyboardButton(f"⚖️ Auditoría — €{PRICING['phase2']}", callback_data="m_pay2")],
-                [InlineKeyboardButton("📦 Ver servicios adicionales", callback_data="extra_services")],
-                [InlineKeyboardButton("← Volver", callback_data="back")],
+                [InlineKeyboardButton(f"Pagar TODO — €{PRICING['prepay_total']}", callback_data="pay_full")],
+                [InlineKeyboardButton(f"Evaluacion — €{PRICING['phase2']}", callback_data="m_pay2")],
+                [InlineKeyboardButton("Ver servicios adicionales", callback_data="extra_services")],
+                [InlineKeyboardButton("Volver", callback_data="back")],
             ]))
         return ST_MAIN_MENU
 
@@ -4368,14 +4368,14 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                 "Aún no tienes código de referidos.\n"
                 "Completa la verificación de elegibilidad primero.",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("← Volver", callback_data="back")],
+                    [InlineKeyboardButton("Volver", callback_data="back")],
                 ]),
             )
             return ST_MAIN_MENU
 
         text = build_referidos_text(stats)
         buttons = get_share_buttons(stats['code'])
-        buttons.append([InlineKeyboardButton("← Volver", callback_data="back")])
+        buttons.append([InlineKeyboardButton("Volver", callback_data="back")])
 
         await q.edit_message_text(
             text,
@@ -4405,7 +4405,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Escribe tu mensaje aquí y lo trasladaremos a un abogado:",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("← Volver", callback_data="back")],
+                [InlineKeyboardButton("Volver", callback_data="back")],
             ]))
         ctx.user_data["awaiting_human_msg"] = True
         return ST_HUMAN_MSG
@@ -4416,7 +4416,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Escribe tu mensaje aquí y lo trasladaremos a un abogado:",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("← Volver", callback_data="back")],
+                [InlineKeyboardButton("Volver", callback_data="back")],
             ]))
         ctx.user_data["awaiting_human_msg"] = True
         return ST_HUMAN_MSG
@@ -4506,13 +4506,13 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "✅ *Pago recibido.*\n\n"
             "Ahora viene la parte más importante: *conocer tu caso en detalle*.\n\n"
             "Te vamos a hacer unas preguntas sobre tu situación personal. "
-            "Con tus respuestas + tus documentos, generaremos un *informe de auditoría personalizado*.\n\n"
+            "Con tus respuestas + tus documentos, generaremos un *informe de evaluación personalizado*.\n\n"
             f"💡 Tu código de referidos: `{code}`\n"
             f"Cuando un amigo pague Fase 3, ambos ganáis €{PRICING['referral_credit']}.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📋 Comenzar cuestionario", callback_data="start_questionnaire")],
-                [InlineKeyboardButton("⏰ Más tarde", callback_data="back")],
+                [InlineKeyboardButton("Comenzar cuestionario", callback_data="start_questionnaire")],
+                [InlineKeyboardButton("Mas tarde", callback_data="back")],
             ]),
         )
         return ST_MAIN_MENU
@@ -4521,7 +4521,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         u = get_user(update.effective_user.id)
         code = u.get("referral_code", "") if u else ""
         text = (
-            "*Preparación del expediente — €150*\n\n"
+            f"*Preparación del expediente — €{PRICING['phase3']}*\n\n"
             "Sus documentos han sido verificados. Con este pago, nuestro equipo realizará:\n\n"
             "• Expediente legal completo.\n"
             "• Todos los formularios completados y revisados.\n"
@@ -4577,8 +4577,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"{referral_line}",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📋 Comenzar cuestionario", callback_data="start_phase3_questionnaire")],
-                [InlineKeyboardButton("⏰ Más tarde", callback_data="back")],
+                [InlineKeyboardButton("Comenzar cuestionario", callback_data="start_phase3_questionnaire")],
+                [InlineKeyboardButton("Mas tarde", callback_data="back")],
             ]))
         return ST_MAIN_MENU
 
@@ -4587,7 +4587,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         u = get_user(update.effective_user.id)
         code = u.get("referral_code", "") if u else ""
         text = (
-            "*Presentación de solicitud — €110*\n\n"
+            f"*Presentación de solicitud — €{PRICING['phase4']}*\n\n"
             f"Su expediente está listo. Quedan *{dl} días* hasta el cierre del plazo.\n\n"
             "Con este pago final, realizaremos:\n\n"
             "• Presentación telemática oficial ante Extranjería.\n"
@@ -4610,7 +4610,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             )
         kb_buttons = []
         if STRIPE_LINKS["phase4_bundle"]:
-            kb_buttons.append([InlineKeyboardButton(f"📦 Paquete completo — €{PRICING['phase4_bundle']}", callback_data="buy_phase4_bundle")])
+            kb_buttons.append([InlineKeyboardButton(f"Paquete completo — €{PRICING['phase4_bundle']}", callback_data="buy_phase4_bundle")])
         kb_buttons.extend(_payment_buttons("paid4", STRIPE_LINKS["phase4"]).inline_keyboard)
         await q.edit_message_text(
             text,
@@ -4646,7 +4646,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Ya he realizado el pago", callback_data="paid2")],
-                [InlineKeyboardButton("← Volver", callback_data="back")],
+                [InlineKeyboardButton("Volver", callback_data="back")],
             ]))
         return ST_PAY_PHASE2
 
@@ -4658,10 +4658,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         referral_line = f"\n🎁 _Descuento de €{PRICING['referral_discount']} aplicado por usar código de amigo._\n" if has_referral else ""
         btns = []
         if STRIPE_LINKS["prepay"]:
-            btns.append([InlineKeyboardButton(f"💳 Pagar €{price}", url=STRIPE_LINKS["prepay"])])
+            btns.append([InlineKeyboardButton(f"Pagar €{price}", url=STRIPE_LINKS["prepay"])])
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
         btns.append([InlineKeyboardButton("Tengo dudas", callback_data="m_contact")])
-        btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
+        btns.append([InlineKeyboardButton("Volver", callback_data="back")])
         await q.edit_message_text(
             f"💳 *Pago Único — €{price}*\n\n"
             "Incluye todas las fases hasta tu resolución:\n"
@@ -4680,9 +4680,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             FAQ_PROOF_DOCUMENTS_FULL,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📄 Subir documentos", callback_data="m_upload")],
-                [InlineKeyboardButton("📋 Volver a checklist", callback_data="m_checklist")],
-                [InlineKeyboardButton("← Menú", callback_data="back")],
+                [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
+                [InlineKeyboardButton("Volver a checklist", callback_data="m_checklist")],
+                [InlineKeyboardButton("Menu", callback_data="back")],
             ]))
         return ST_MAIN_MENU
 
@@ -4710,8 +4710,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "¿Quieres que te contactemos?",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("✅ Sí, contactadme", callback_data="confirm_antecedentes_request")],
-                [InlineKeyboardButton("← Volver", callback_data="antecedentes_help")],
+                [InlineKeyboardButton("Si, contactadme", callback_data="confirm_antecedentes_request")],
+                [InlineKeyboardButton("Volver", callback_data="antecedentes_help")],
             ]))
         return ST_MAIN_MENU
 
@@ -4740,8 +4740,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Mientras tanto, puedes seguir subiendo otros documentos.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📄 Subir documentos", callback_data="m_upload")],
-                [InlineKeyboardButton("← Menú", callback_data="back")],
+                [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
+                [InlineKeyboardButton("Menu", callback_data="back")],
             ]))
         return ST_MAIN_MENU
 
@@ -4753,9 +4753,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         upsell_msg = get_antecedentes_upsell_message(country_code)
         btns = []
         if STRIPE_LINKS["antecedentes_foreign"]:
-            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['antecedentes_foreign']}", url=STRIPE_LINKS["antecedentes_foreign"])])
+            btns.append([InlineKeyboardButton(f"Pagar €{PRICING['antecedentes_foreign']}", url=STRIPE_LINKS["antecedentes_foreign"])])
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
-        btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
+        btns.append([InlineKeyboardButton("Volver", callback_data="back")])
         await q.edit_message_text(
             upsell_msg,
             parse_mode=ParseMode.MARKDOWN,
@@ -4766,9 +4766,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         tid = update.effective_user.id
         btns = []
         if STRIPE_LINKS["govt_fees"]:
-            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['govt_fees_service']}", url=STRIPE_LINKS["govt_fees"])])
+            btns.append([InlineKeyboardButton(f"Pagar €{PRICING['govt_fees_service']}", url=STRIPE_LINKS["govt_fees"])])
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
-        btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
+        btns.append([InlineKeyboardButton("Volver", callback_data="back")])
         await q.edit_message_text(
             f"🏛️ *Gestión de Tasas Gubernamentales — €{PRICING['govt_fees_service']}*\n\n"
             "Nos encargamos de:\n\n"
@@ -4802,12 +4802,12 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "_Puedes añadir estos servicios en cualquier momento._",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"📜 Antecedentes España — €{PRICING['antecedentes_spain']}", callback_data="upsell_antec_spain")],
-                [InlineKeyboardButton(f"🌍 Antecedentes país — €{PRICING['antecedentes_foreign']}", callback_data="buy_antecedentes")],
-                [InlineKeyboardButton(f"🏛️ Tasas gobierno — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
-                [InlineKeyboardButton(f"🔤 Traducción — €{PRICING['translation_per_doc']}/doc", callback_data="buy_translation")],
-                [InlineKeyboardButton(f"⚡ Prioritario — €{PRICING['urgent_processing']}", callback_data="buy_priority")],
-                [InlineKeyboardButton("← Volver", callback_data="back")],
+                [InlineKeyboardButton(f"Antecedentes España — €{PRICING['antecedentes_spain']}", callback_data="upsell_antec_spain")],
+                [InlineKeyboardButton(f"Antecedentes pais — €{PRICING['antecedentes_foreign']}", callback_data="buy_antecedentes")],
+                [InlineKeyboardButton(f"Tasas gobierno — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
+                [InlineKeyboardButton(f"Traduccion — €{PRICING['translation_per_doc']}/doc", callback_data="buy_translation")],
+                [InlineKeyboardButton(f"Prioritario — €{PRICING['urgent_processing']}", callback_data="buy_priority")],
+                [InlineKeyboardButton("Volver", callback_data="back")],
             ]))
         return ST_MAIN_MENU
 
@@ -4822,9 +4822,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "buy_antec_spain":
         btns = []
         if STRIPE_LINKS["antecedentes_spain"]:
-            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['antecedentes_spain']}", url=STRIPE_LINKS["antecedentes_spain"])])
+            btns.append([InlineKeyboardButton(f"Pagar €{PRICING['antecedentes_spain']}", url=STRIPE_LINKS["antecedentes_spain"])])
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
-        btns.append([InlineKeyboardButton("← Volver", callback_data="extra_services")])
+        btns.append([InlineKeyboardButton("Volver", callback_data="extra_services")])
         await q.edit_message_text(
             f"📜 *Antecedentes España — €{PRICING['antecedentes_spain']}*\n\n"
             "Para tramitar en tu nombre, necesitamos:\n\n"
@@ -4842,7 +4842,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton(f"He cambiado de opinión — €{PRICING['antecedentes_spain']}", callback_data="buy_antec_spain")],
-                [InlineKeyboardButton("← Menú", callback_data="back")],
+                [InlineKeyboardButton("Menu", callback_data="back")],
             ]))
         return ST_MAIN_MENU
 
@@ -4850,9 +4850,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "buy_translation":
         btns = []
         if STRIPE_LINKS["translation"]:
-            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['translation_per_doc']}", url=STRIPE_LINKS["translation"])])
+            btns.append([InlineKeyboardButton(f"Pagar €{PRICING['translation_per_doc']}", url=STRIPE_LINKS["translation"])])
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
-        btns.append([InlineKeyboardButton("← Volver", callback_data="extra_services")])
+        btns.append([InlineKeyboardButton("Volver", callback_data="extra_services")])
         await q.edit_message_text(
             UPSELL_TRANSLATION,
             parse_mode=ParseMode.MARKDOWN,
@@ -4863,7 +4863,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "buy_priority":
         btns = []
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
-        btns.append([InlineKeyboardButton("← Volver", callback_data="extra_services")])
+        btns.append([InlineKeyboardButton("Volver", callback_data="extra_services")])
         await q.edit_message_text(
             UPSELL_PRIORITY,
             parse_mode=ParseMode.MARKDOWN,
@@ -4877,9 +4877,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         price = PRICING['vip_bundle'] - PRICING['referral_discount'] if has_referral else PRICING['vip_bundle']
         btns = []
         if STRIPE_LINKS["vip_bundle"]:
-            btns.append([InlineKeyboardButton(f"💳 Pagar €{price}", url=STRIPE_LINKS["vip_bundle"])])
+            btns.append([InlineKeyboardButton(f"Pagar €{price}", url=STRIPE_LINKS["vip_bundle"])])
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
-        btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
+        btns.append([InlineKeyboardButton("Volver", callback_data="back")])
         await q.edit_message_text(
             VIP_BUNDLE_OFFER,
             parse_mode=ParseMode.MARKDOWN,
@@ -4889,9 +4889,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "buy_phase4_bundle":
         btns = []
         if STRIPE_LINKS["phase4_bundle"]:
-            btns.append([InlineKeyboardButton(f"💳 Pagar €{PRICING['phase4_bundle']}", url=STRIPE_LINKS["phase4_bundle"])])
+            btns.append([InlineKeyboardButton(f"Pagar €{PRICING['phase4_bundle']}", url=STRIPE_LINKS["phase4_bundle"])])
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
-        btns.append([InlineKeyboardButton("← Volver", callback_data="back")])
+        btns.append([InlineKeyboardButton("Volver", callback_data="back")])
         await q.edit_message_text(
             PHASE4_BUNDLE_OFFER,
             parse_mode=ParseMode.MARKDOWN,
@@ -4904,10 +4904,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             PRICING_EXPLANATION,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"⭐ Pagar TODO — €{PRICING['prepay_total']}", callback_data="pay_full")],
-                [InlineKeyboardButton(f"⚖️ Auditoría — €{PRICING['phase2']}", callback_data="m_pay2")],
-                [InlineKeyboardButton("📦 Servicios adicionales", callback_data="extra_services")],
-                [InlineKeyboardButton("← Menú", callback_data="back")],
+                [InlineKeyboardButton(f"Pagar TODO — €{PRICING['prepay_total']}", callback_data="pay_full")],
+                [InlineKeyboardButton(f"Evaluacion — €{PRICING['phase2']}", callback_data="m_pay2")],
+                [InlineKeyboardButton("Servicios adicionales", callback_data="extra_services")],
+                [InlineKeyboardButton("Menu", callback_data="back")],
             ]))
         return ST_MAIN_MENU
 
@@ -4926,8 +4926,8 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"💡 Por €{PRICING['govt_fees_service']} nos encargamos de todo esto por ti.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"✅ Gestionadlo — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
-                [InlineKeyboardButton("← Volver", callback_data="back")],
+                [InlineKeyboardButton(f"Gestionadlo — €{PRICING['govt_fees_service']}", callback_data="buy_govt_fees")],
+                [InlineKeyboardButton("Volver", callback_data="back")],
             ]))
         return ST_MAIN_MENU
 
@@ -4947,7 +4947,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                 text + "\n\n_Escribe tu respuesta:_",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("⏭️ Saltar", callback_data=f"p2q_{q_data['id']}_skip")],
+                    [InlineKeyboardButton("Saltar", callback_data=f"p2q_{q_data['id']}_skip")],
                 ]))
             return ST_PHASE2_TEXT_ANSWER
 
@@ -4966,7 +4966,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         else:
             skip_btn = []
             if not q_data.get("required"):
-                skip_btn = [[InlineKeyboardButton("⏭️ Saltar", callback_data=f"p3q_{q_data['id']}_skip")]]
+                skip_btn = [[InlineKeyboardButton("Saltar", callback_data=f"p3q_{q_data['id']}_skip")]]
             await q.edit_message_text(
                 text + "\n\n_Escribe tu respuesta:_",
                 parse_mode=ParseMode.MARKDOWN,
@@ -4996,9 +4996,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                 "   Empiezas mañana. Ahorras €45.",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton(f"⭐ Reservar plaza — €{PREPAY_BYPASS_PRICE}", callback_data="pay_bypass")],
-                    [InlineKeyboardButton("⏳ Apuntarme a la lista", callback_data="join_waitlist")],
-                    [InlineKeyboardButton("📤 Seguir subiendo docs", callback_data="m_upload")],
+                    [InlineKeyboardButton(f"Reservar plaza — €{PREPAY_BYPASS_PRICE}", callback_data="pay_bypass")],
+                    [InlineKeyboardButton("Apuntarme a la lista", callback_data="join_waitlist")],
+                    [InlineKeyboardButton("Seguir subiendo docs", callback_data="m_upload")],
                 ]))
             return ST_MAIN_MENU
 
@@ -5012,7 +5012,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"📊 *Has subido {dc} documentos. Buen trabajo.*\n\n"
             f"📊 Plazas disponibles: *{available} de {TOTAL_CAPACITY}*\n\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "⚖️ AUDITORÍA PERSONALIZADA\n"
+            "EVALUACIÓN PERSONALIZADA\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "✅ Revisamos cada documento\n"
             "✅ 20+ preguntas sobre tu situación\n"
@@ -5022,10 +5022,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"Por €{prepay_price} tienes TODO hasta la resolución. Ahorras €45.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton(f"⚖️ Auditoría — €{phase2_price}", callback_data="m_pay2")],
-                [InlineKeyboardButton(f"⭐ Todo incluido — €{prepay_price}", callback_data="pay_full")],
-                [InlineKeyboardButton("📤 Subir más documentos", callback_data="m_upload")],
-                [InlineKeyboardButton("❓ ¿Por qué estos precios?", callback_data="faq_pricing")],
+                [InlineKeyboardButton(f"Evaluacion — €{phase2_price}", callback_data="m_pay2")],
+                [InlineKeyboardButton(f"Todo incluido — €{prepay_price}", callback_data="pay_full")],
+                [InlineKeyboardButton("Subir mas documentos", callback_data="m_upload")],
+                [InlineKeyboardButton("¿Por que estos precios?", callback_data="faq_pricing")],
             ]))
         return ST_MAIN_MENU
 
@@ -5048,9 +5048,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Cuanto más preparado estés, más rápido será el proceso.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📤 Subir más documentos", callback_data="m_upload")],
-                [InlineKeyboardButton("📋 Ver mis documentos", callback_data="m_docs")],
-                [InlineKeyboardButton("← Menú", callback_data="back")],
+                [InlineKeyboardButton("Subir mas documentos", callback_data="m_upload")],
+                [InlineKeyboardButton("Ver mis documentos", callback_data="m_docs")],
+                [InlineKeyboardButton("Menu", callback_data="back")],
             ]))
         return ST_MAIN_MENU
 
@@ -5058,17 +5058,17 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "pay_bypass":
         btns = []
         if STRIPE_LINKS["prepay"]:
-            btns.append([InlineKeyboardButton(f"💳 Pagar €{PREPAY_BYPASS_PRICE}", url=STRIPE_LINKS["prepay"])])
+            btns.append([InlineKeyboardButton(f"Pagar €{PREPAY_BYPASS_PRICE}", url=STRIPE_LINKS["prepay"])])
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
-        btns.append([InlineKeyboardButton("← Volver", callback_data="request_phase2")])
+        btns.append([InlineKeyboardButton("Volver", callback_data="request_phase2")])
         await q.edit_message_text(
             f"⭐ *RESERVA TU PLAZA*\n\n"
             f"Pago único: *€{PREPAY_BYPASS_PRICE}*\n\n"
             "Incluye TODO hasta la resolución:\n"
-            "✅ Auditoría personalizada (Fase 2)\n"
-            "✅ Expediente a medida (Fase 3)\n"
-            "✅ Presentación + seguimiento (Fase 4)\n"
-            "✅ Recurso si necesario\n\n"
+            "Evaluación personalizada (Fase 2)\n"
+            "Expediente a medida (Fase 3)\n"
+            "Presentación + seguimiento (Fase 4)\n"
+            "Recurso si necesario\n\n"
             "*Ahorras €45* vs pago por fases.\n"
             "*Empiezas mañana* — sin esperar lista.",
             parse_mode=ParseMode.MARKDOWN,
@@ -5132,9 +5132,9 @@ async def handle_phase2_questionnaire(update: Update, ctx: ContextTypes.DEFAULT_
             f"📜 Antecedentes España — €{PRICING['antecedentes_spain']}", callback_data="upsell_antec_spain")])
 
         btns = upsell_btns + [
-            [InlineKeyboardButton(f"📦 Siguiente: expediente — €{PRICING['phase3']}", callback_data="m_pay3")],
-            [InlineKeyboardButton("📦 Ver servicios adicionales", callback_data="extra_services")],
-            [InlineKeyboardButton("← Menú", callback_data="back")],
+            [InlineKeyboardButton(f"Siguiente: expediente — €{PRICING['phase3']}", callback_data="m_pay3")],
+            [InlineKeyboardButton("Ver servicios adicionales", callback_data="extra_services")],
+            [InlineKeyboardButton("Menu", callback_data="back")],
         ]
 
         await q.edit_message_text(
@@ -5166,7 +5166,7 @@ async def handle_phase2_questionnaire(update: Update, ctx: ContextTypes.DEFAULT_
             text + "\n\n_Escribe tu respuesta:_",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⏭️ Saltar", callback_data=f"p2q_{q_data['id']}_skip")],
+                [InlineKeyboardButton("Saltar", callback_data=f"p2q_{q_data['id']}_skip")],
             ]))
         return ST_PHASE2_TEXT_ANSWER
 
@@ -5199,9 +5199,9 @@ async def handle_phase2_text_answer(update: Update, ctx: ContextTypes.DEFAULT_TY
             f"📜 Antecedentes España — €{PRICING['antecedentes_spain']}", callback_data="upsell_antec_spain")])
 
         btns = upsell_btns + [
-            [InlineKeyboardButton(f"📦 Siguiente: expediente — €{PRICING['phase3']}", callback_data="m_pay3")],
-            [InlineKeyboardButton("📦 Ver servicios adicionales", callback_data="extra_services")],
-            [InlineKeyboardButton("← Menú", callback_data="back")],
+            [InlineKeyboardButton(f"Siguiente: expediente — €{PRICING['phase3']}", callback_data="m_pay3")],
+            [InlineKeyboardButton("Ver servicios adicionales", callback_data="extra_services")],
+            [InlineKeyboardButton("Menu", callback_data="back")],
         ]
 
         await update.message.reply_text(
@@ -5232,7 +5232,7 @@ async def handle_phase2_text_answer(update: Update, ctx: ContextTypes.DEFAULT_TY
             text_msg + "\n\n_Escribe tu respuesta:_",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("⏭️ Saltar", callback_data=f"p2q_{q_data['id']}_skip")],
+                [InlineKeyboardButton("Saltar", callback_data=f"p2q_{q_data['id']}_skip")],
             ]))
         return ST_PHASE2_TEXT_ANSWER
 
@@ -5269,7 +5269,7 @@ async def handle_phase3_questionnaire(update: Update, ctx: ContextTypes.DEFAULT_
             PHASE3_COMPLETION,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("← Menú principal", callback_data="back")],
+                [InlineKeyboardButton("Menu principal", callback_data="back")],
             ]))
 
         user = get_user(tid)
@@ -5295,7 +5295,7 @@ async def handle_phase3_questionnaire(update: Update, ctx: ContextTypes.DEFAULT_
     else:
         skip_btn = []
         if not q_data.get("required"):
-            skip_btn = [[InlineKeyboardButton("⏭️ Saltar", callback_data=f"p3q_{q_data['id']}_skip")]]
+            skip_btn = [[InlineKeyboardButton("Saltar", callback_data=f"p3q_{q_data['id']}_skip")]]
         await q.edit_message_text(
             text + "\n\n_Escribe tu respuesta:_",
             parse_mode=ParseMode.MARKDOWN,
@@ -5326,7 +5326,7 @@ async def handle_phase3_text_answer(update: Update, ctx: ContextTypes.DEFAULT_TY
             PHASE3_COMPLETION,
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("← Menú principal", callback_data="back")],
+                [InlineKeyboardButton("Menu principal", callback_data="back")],
             ]))
 
         user = get_user(tid)
@@ -5352,7 +5352,7 @@ async def handle_phase3_text_answer(update: Update, ctx: ContextTypes.DEFAULT_TY
     else:
         skip_btn = []
         if not q_data.get("required"):
-            skip_btn = [[InlineKeyboardButton("⏭️ Saltar", callback_data=f"p3q_{q_data['id']}_skip")]]
+            skip_btn = [[InlineKeyboardButton("Saltar", callback_data=f"p3q_{q_data['id']}_skip")]]
         await update.message.reply_text(
             text_msg + "\n\n_Escribe tu respuesta:_",
             parse_mode=ParseMode.MARKDOWN,
@@ -5390,14 +5390,14 @@ async def handle_faq_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int
                           "sin_empadronamiento", "documentos_otro_nombre"}
             btns = []
             if key in proof_keys:
-                btns.append([InlineKeyboardButton("📋 Ver 40+ documentos válidos", callback_data="proof_docs_full")])
+                btns.append([InlineKeyboardButton("Ver 40+ documentos validos", callback_data="proof_docs_full")])
             cat_key = ctx.user_data.get("faq_cat")
             if cat_key and cat_key in FAQ_CATEGORIES:
                 btns.append([InlineKeyboardButton(
                     f"← {FAQ_CATEGORIES[cat_key]['title']}",
                     callback_data=f"fcat_{cat_key}")])
-            btns.append([InlineKeyboardButton("📋 Todas las categorías", callback_data="m_faq")])
-            btns.append([InlineKeyboardButton("← Menú principal", callback_data="back")])
+            btns.append([InlineKeyboardButton("Todas las categorias", callback_data="m_faq")])
+            btns.append([InlineKeyboardButton("Menu principal", callback_data="back")])
             await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup(btns))
         return ST_FAQ_ITEM
@@ -5618,7 +5618,7 @@ async def handle_free_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> in
             "Escribe tu mensaje aquí y lo trasladaremos a un abogado:",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("← Volver al menú", callback_data="back")],
+                [InlineKeyboardButton("Volver al menu", callback_data="back")],
             ]))
         ctx.user_data["awaiting_human_msg"] = True
         return ST_HUMAN_MSG
@@ -5879,7 +5879,7 @@ async def cmd_release(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ),
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚀 Continuar ahora", callback_data="request_phase2")]
+                    [InlineKeyboardButton("Continuar ahora", callback_data="request_phase2")]
                 ]))
             mark_waitlist_notified(wl_user['telegram_id'])
             sent += 1
@@ -6172,12 +6172,12 @@ async def show_pending_document(update: Update, ctx: ContextTypes.DEFAULT_TYPE, 
     # Action buttons
     buttons = [
         [
-            InlineKeyboardButton("✓ Aprobar", callback_data=f"pdoc_approve_{doc_id}"),
-            InlineKeyboardButton("✗ Rechazar", callback_data=f"pdoc_reject_{doc_id}"),
+            InlineKeyboardButton("Aprobar", callback_data=f"pdoc_approve_{doc_id}"),
+            InlineKeyboardButton("Rechazar", callback_data=f"pdoc_reject_{doc_id}"),
         ],
         [
-            InlineKeyboardButton("🔄 Pedir nueva foto", callback_data=f"pdoc_resubmit_{doc_id}"),
-            InlineKeyboardButton("⏭ Siguiente", callback_data="pdoc_next"),
+            InlineKeyboardButton("Pedir nueva foto", callback_data=f"pdoc_resubmit_{doc_id}"),
+            InlineKeyboardButton("Siguiente", callback_data="pdoc_next"),
         ],
     ]
 
@@ -6277,12 +6277,12 @@ async def handle_pending_doc_callback(update: Update, ctx: ContextTypes.DEFAULT_
     elif action == "reject":
         # Show rejection reason buttons
         buttons = [
-            [InlineKeyboardButton("📷 Borroso/ilegible", callback_data=f"prej_blur_{doc_id}")],
-            [InlineKeyboardButton("✂️ Incompleto/recortado", callback_data=f"prej_inc_{doc_id}")],
-            [InlineKeyboardButton("📅 Documento vencido", callback_data=f"prej_exp_{doc_id}")],
-            [InlineKeyboardButton("❓ Tipo incorrecto", callback_data=f"prej_wrong_{doc_id}")],
-            [InlineKeyboardButton("🚫 No es documento válido", callback_data=f"prej_invalid_{doc_id}")],
-            [InlineKeyboardButton("✏️ Otro motivo", callback_data=f"prej_other_{doc_id}")],
+            [InlineKeyboardButton("Borroso/ilegible", callback_data=f"prej_blur_{doc_id}")],
+            [InlineKeyboardButton("Incompleto/recortado", callback_data=f"prej_inc_{doc_id}")],
+            [InlineKeyboardButton("Documento vencido", callback_data=f"prej_exp_{doc_id}")],
+            [InlineKeyboardButton("Tipo incorrecto", callback_data=f"prej_wrong_{doc_id}")],
+            [InlineKeyboardButton("No es documento valido", callback_data=f"prej_invalid_{doc_id}")],
+            [InlineKeyboardButton("Otro motivo", callback_data=f"prej_other_{doc_id}")],
         ]
         await q.message.reply_text(
             f"*Seleccione el motivo del rechazo:*\nDocumento #{doc_id}",
@@ -6295,13 +6295,13 @@ async def handle_pending_doc_callback(update: Update, ctx: ContextTypes.DEFAULT_
         # Show specific re-upload reason buttons
         ctx.user_data["resubmit_doc_id"] = doc_id
         buttons = [
-            [InlineKeyboardButton("💡 Flash/reflejo", callback_data=f"pres_flash_{doc_id}")],
-            [InlineKeyboardButton("🌑 Poca luz", callback_data=f"pres_dark_{doc_id}")],
-            [InlineKeyboardButton("🔍 Borroso", callback_data=f"pres_blur_{doc_id}")],
-            [InlineKeyboardButton("✂️ Cortado", callback_data=f"pres_cut_{doc_id}")],
-            [InlineKeyboardButton("📐 Ángulo incorrecto", callback_data=f"pres_angle_{doc_id}")],
-            [InlineKeyboardButton("📄 Sube frente/reverso", callback_data=f"pres_flip_{doc_id}")],
-            [InlineKeyboardButton("✏️ Escribir mensaje personalizado", callback_data=f"pres_custom_{doc_id}")],
+            [InlineKeyboardButton("Flash/reflejo", callback_data=f"pres_flash_{doc_id}")],
+            [InlineKeyboardButton("Poca luz", callback_data=f"pres_dark_{doc_id}")],
+            [InlineKeyboardButton("Borroso", callback_data=f"pres_blur_{doc_id}")],
+            [InlineKeyboardButton("Cortado", callback_data=f"pres_cut_{doc_id}")],
+            [InlineKeyboardButton("Angulo incorrecto", callback_data=f"pres_angle_{doc_id}")],
+            [InlineKeyboardButton("Sube frente/reverso", callback_data=f"pres_flip_{doc_id}")],
+            [InlineKeyboardButton("Escribir mensaje personalizado", callback_data=f"pres_custom_{doc_id}")],
         ]
         await q.message.reply_text(
             f"*¿Por qué necesita nueva foto?*\nDocumento #{doc_id}",
@@ -6670,7 +6670,7 @@ async def cmd_referidos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
     text = build_referidos_text(stats)
     buttons = get_share_buttons(stats['code'])
-    buttons.append([InlineKeyboardButton("← Menú", callback_data="back")])
+    buttons.append([InlineKeyboardButton("Menu", callback_data="back")])
 
     await update.message.reply_text(
         text,
@@ -6740,10 +6740,10 @@ async def cmd_estado(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         f"{'✅ Expediente listo para presentar' if user.get('expediente_ready') else '⏳ En proceso'}",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📄 Ver documentos", callback_data="m_docs")],
-            [InlineKeyboardButton("📤 Subir documento", callback_data="m_upload")],
-            [InlineKeyboardButton("📣 Compartir mi código", callback_data="m_referidos")],
-            [InlineKeyboardButton("← Menú", callback_data="back")],
+            [InlineKeyboardButton("Ver documentos", callback_data="m_docs")],
+            [InlineKeyboardButton("Subir documento", callback_data="m_upload")],
+            [InlineKeyboardButton("Compartir mi codigo", callback_data="m_referidos")],
+            [InlineKeyboardButton("Menu", callback_data="back")],
         ]),
     )
     return ST_MAIN_MENU
@@ -6768,8 +6768,8 @@ async def cmd_documentos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "No ha subido ningún documento todavía.\n\n"
             "Use el menú para subir sus documentos.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📄 Subir documentos", callback_data="m_docs")],
-                [InlineKeyboardButton("← Menú", callback_data="m_menu")],
+                [InlineKeyboardButton("Subir documentos", callback_data="m_docs")],
+                [InlineKeyboardButton("Menu", callback_data="m_menu")],
             ]),
         )
         return ST_MAIN_MENU
@@ -6790,8 +6790,8 @@ async def cmd_documentos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         msg,
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("📄 Subir más documentos", callback_data="m_docs")],
-            [InlineKeyboardButton("← Menú", callback_data="m_menu")],
+            [InlineKeyboardButton("Subir mas documentos", callback_data="m_docs")],
+            [InlineKeyboardButton("Menu", callback_data="m_menu")],
         ]),
     )
     return ST_MAIN_MENU
@@ -6834,7 +6834,7 @@ async def cmd_contacto(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "Escribe tu mensaje aquí y lo trasladaremos a un abogado:",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("← Menú", callback_data="m_menu")],
+            [InlineKeyboardButton("Menu", callback_data="m_menu")],
         ]),
     )
     ctx.user_data["awaiting_human_msg"] = True
