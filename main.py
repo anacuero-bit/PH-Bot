@@ -11,7 +11,7 @@ CHANGELOG:
 v6.0.0 (2026-02-09)
   - MVP overhaul for pre-BOE launch
   - Added waitlist wall (blocks Phase 2+ until BOE publishes)
-  - New pricing: €199 total (€29 + €69 + €99)
+  - New pricing: €199 prepay / €247 by phases (€29 + €89 + €129)
   - Waitlist counter with deterministic fake growth
   - Professional Spanish tone, minimal emojis
   - Payment flows disabled until BOE publishes
@@ -292,7 +292,7 @@ MIN_DOCS_FOR_PHASE2 = 3
 # MVP Launch Config
 TOTAL_CAPACITY = 1000
 BOE_PUBLISHED = False  # Flip to True when BOE publishes and payments open
-PREPAY_BYPASS_PRICE = 197
+PREPAY_BYPASS_PRICE = 199
 
 
 def is_payments_enabled() -> bool:
@@ -320,11 +320,11 @@ logger = logging.getLogger("ph-bot")
 PRICING = {
     "phase1": 0,       # FREE — upload docs, get comfortable
     "phase2": 29,      # Audit + personalized strategy
-    "phase3": 69,      # Tailored expediente preparation
-    "phase4": 99,      # Submission + tracking
-    "total_phases": 197,
-    "prepay_discount": 0,
-    "prepay_total": 197,
+    "phase3": 89,      # Tailored expediente preparation
+    "phase4": 129,     # Submission + tracking
+    "total_phases": 247,
+    "prepay_discount": 48,
+    "prepay_total": 199,
     # Extra services
     "antecedentes_spain": 29,      # Spain criminal record (we handle Cl@ve)
     "antecedentes_foreign": 49,    # Foreign certificate + apostille + translation
@@ -340,7 +340,7 @@ PRICING = {
     # Referral
     "referral_discount": 25,
     "referral_credit": 25,
-    "referral_max": 197,
+    "referral_max": 247,
 }
 
 # Stripe payment links (env vars — set in Railway)
@@ -954,7 +954,7 @@ PRICING_EXPLANATION = (
     f"• *Total: €{PRICING['total_phases']}*\n\n"
     "*Opción 2: Pago único* ⭐ RECOMENDADO\n"
     f"• Todo incluido: *€{PRICING['prepay_total']}*\n"
-    f"• Ahorras €{PRICING['prepay_discount']} (15%)\n\n"
+    f"• Ahorras €{PRICING['prepay_discount']} ({round(PRICING['prepay_discount']/PRICING['total_phases']*100)}%)\n\n"
     "━━━━━━━━━━━━━━━━━━━━\n"
     "🛠️ SERVICIOS ADICIONALES\n"
     "━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -1495,7 +1495,7 @@ FAQ = {
             "*Para ti:*\n"
             "Cuando tu amigo pague Fase 3, ganas €25 de crédito "
             "que se aplica a tus siguientes pagos.\n\n"
-            f"Máximo: €{PRICING['referral_max']} en créditos (8 amigos = servicio gratis).\n\n"
+            f"Máximo: €{PRICING['referral_max']} en créditos (10 amigos = servicio gratis).\n\n"
             "Puedes ver tu código y estadísticas con el comando /referidos."
         ),
     },
@@ -4993,7 +4993,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
                 "   Te avisamos cuando haya plaza. Sin coste.\n\n"
                 f"2️⃣ *Reservar tu plaza ahora — €{PREPAY_BYPASS_PRICE}*\n"
                 "   Pago único. Todo incluido hasta la resolución.\n"
-                "   Empiezas mañana. Ahorras €45.",
+                "   Empiezas mañana. Ahorras €48.",
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton(f"Reservar plaza — €{PREPAY_BYPASS_PRICE}", callback_data="pay_bypass")],
@@ -5019,7 +5019,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "✅ Estrategia personalizada\n"
             "✅ Detectamos qué te falta\n\n"
             f"⭐ *¿Prefieres pagar todo de una vez?*\n"
-            f"Por €{prepay_price} tienes TODO hasta la resolución. Ahorras €45.",
+            f"Por €{prepay_price} tienes TODO hasta la resolución. Ahorras €48.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton(f"Evaluacion — €{phase2_price}", callback_data="m_pay2")],
@@ -5069,7 +5069,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Expediente a medida (Fase 3)\n"
             "Presentación + seguimiento (Fase 4)\n"
             "Recurso si necesario\n\n"
-            "*Ahorras €45* vs pago por fases.\n"
+            f"*Ahorras €{PRICING['prepay_discount']}* vs pago por fases.\n"
             "*Empiezas mañana* — sin esperar lista.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(btns))
@@ -5812,7 +5812,7 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     c.execute("SELECT COUNT(*) FROM documents"); docs = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM messages WHERE direction='in'"); msgs = c.fetchone()[0]
     conn.close()
-    rev = (p2 * 29) + (p3 * 69) + (p4 * 99)
+    rev = (p2 * PRICING['phase2']) + (p3 * PRICING['phase3']) + (p4 * PRICING['phase4'])
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
     available = get_available_slots()
     wl_stats = get_waitlist_stats()
@@ -5822,9 +5822,9 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Elegibles: {eligible}\n"
         f"Documentos: {docs}\n"
         f"Mensajes recibidos: {msgs}\n\n"
-        f"Fase 2 pagados: {p2} (€{p2*29})\n"
-        f"Fase 3 pagados: {p3} (€{p3*69})\n"
-        f"Fase 4 pagados: {p4} (€{p4*99})\n"
+        f"Fase 2 pagados: {p2} (€{p2*PRICING['phase2']})\n"
+        f"Fase 3 pagados: {p3} (€{p3*PRICING['phase3']})\n"
+        f"Fase 4 pagados: {p4} (€{p4*PRICING['phase4']})\n"
         f"*Ingresos: €{rev}*\n\n"
         f"📊 *Capacidad:* {TOTAL_CAPACITY - available}/{TOTAL_CAPACITY} ({available} libres)\n"
         f"⏳ *Lista espera:* {wl_stats['total']}\n\n"
@@ -7129,7 +7129,7 @@ def main():
 
     logger.info("PH-Bot v6.0.0 starting")
     logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
-    logger.info(f"Payment: FREE > €29 > €69 > €99 | Days left: {days_left()} | BOE: {BOE_PUBLISHED}")
+    logger.info(f"Payment: FREE > €{PRICING['phase2']} > €{PRICING['phase3']} > €{PRICING['phase4']} | Days left: {days_left()} | BOE: {BOE_PUBLISHED}")
     logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
