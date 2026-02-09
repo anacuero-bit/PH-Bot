@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v5.10.0 — Client Intake & Case Management
+PH-Bot v6.0.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
-Updated:    2026-02-08
+Updated:    2026-02-09
 
 CHANGELOG:
 ----------
+v6.0.0 (2026-02-09)
+  - MVP overhaul for pre-BOE launch
+  - Added waitlist wall (blocks Phase 2+ until BOE publishes)
+  - New pricing: €199 total (€29 + €69 + €99)
+  - Waitlist counter with deterministic fake growth
+  - Professional Spanish tone, minimal emojis
+  - Payment flows disabled until BOE publishes
+
 v5.10.0 (2026-02-08)
   - NEW: Live capacity counter ("X de 1,000 plazas")
   - NEW: Waitlist system — triggers at Phase 2 when capacity full
@@ -281,8 +289,15 @@ MIN_DOCS_FOR_PHASE2 = 3
 # =============================================================================
 # CAPACITY MANAGEMENT
 # =============================================================================
+# MVP Launch Config
 TOTAL_CAPACITY = 1000
-PREPAY_BYPASS_PRICE = 254  # Pay full upfront = skip waitlist
+BOE_PUBLISHED = False  # Flip to True when BOE publishes and payments open
+PREPAY_BYPASS_PRICE = 199
+
+
+def is_payments_enabled() -> bool:
+    """Returns True only after BOE publishes."""
+    return BOE_PUBLISHED
 
 # =============================================================================
 # CRITICAL DATES — USE THESE CONSTANTS EVERYWHERE
@@ -304,12 +319,12 @@ logger = logging.getLogger("ph-bot")
 
 PRICING = {
     "phase1": 0,       # FREE — upload docs, get comfortable
-    "phase2": 39,      # Audit + personalized strategy
-    "phase3": 150,     # Tailored expediente preparation
-    "phase4": 110,     # Submission + tracking
-    "total_phases": 299,
-    "prepay_discount": 45,
-    "prepay_total": 254,
+    "phase2": 29,      # Audit + personalized strategy
+    "phase3": 69,      # Tailored expediente preparation
+    "phase4": 99,      # Submission + tracking
+    "total_phases": 197,
+    "prepay_discount": 0,
+    "prepay_total": 199,
     # Extra services
     "antecedentes_spain": 29,      # Spain criminal record (we handle Cl@ve)
     "antecedentes_foreign": 49,    # Foreign certificate + apostille + translation
@@ -2392,6 +2407,27 @@ def find_faq_match(text: str) -> Optional[Dict]:
 import random
 import string
 
+
+def get_waitlist_count() -> int:
+    """Deterministic fake waitlist counter. Grows 50-200/day from base 3127."""
+    import hashlib
+    from datetime import date, timedelta
+
+    LAUNCH_DATE = date(2026, 2, 15)
+    BASE_COUNT = 3127
+
+    days = (date.today() - LAUNCH_DATE).days
+    if days < 0:
+        return BASE_COUNT
+
+    total = BASE_COUNT
+    for day in range(days):
+        seed = f"waitlist-{LAUNCH_DATE + timedelta(days=day)}"
+        day_hash = int(hashlib.md5(seed.encode()).hexdigest(), 16)
+        total += 50 + (day_hash % 151)
+    return total
+
+
 def generate_referral_code(user_id: int) -> str:
     """Generate unique referral code: NAME-XXXX
 
@@ -4341,7 +4377,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "m_pay2":
         tid = update.effective_user.id
         dc = get_doc_count(tid)
-        base_price = 39  # Phase 2 price
+        base_price = PRICING['phase2']
 
         # Check friend discount
         friend_disc = get_friend_discount(tid)
@@ -5752,7 +5788,7 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     c.execute("SELECT COUNT(*) FROM documents"); docs = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM messages WHERE direction='in'"); msgs = c.fetchone()[0]
     conn.close()
-    rev = (p2 * 39) + (p3 * 150) + (p4 * 110)
+    rev = (p2 * 29) + (p3 * 69) + (p4 * 99)
     db_type = "PostgreSQL" if USE_POSTGRES else "SQLite"
     available = get_available_slots()
     wl_stats = get_waitlist_stats()
@@ -5762,9 +5798,9 @@ async def cmd_stats(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"Elegibles: {eligible}\n"
         f"Documentos: {docs}\n"
         f"Mensajes recibidos: {msgs}\n\n"
-        f"Fase 2 pagados: {p2} (€{p2*39})\n"
-        f"Fase 3 pagados: {p3} (€{p3*150})\n"
-        f"Fase 4 pagados: {p4} (€{p4*110})\n"
+        f"Fase 2 pagados: {p2} (€{p2*29})\n"
+        f"Fase 3 pagados: {p3} (€{p3*69})\n"
+        f"Fase 4 pagados: {p4} (€{p4*99})\n"
         f"*Ingresos: €{rev}*\n\n"
         f"📊 *Capacidad:* {TOTAL_CAPACITY - available}/{TOTAL_CAPACITY} ({available} libres)\n"
         f"⏳ *Lista espera:* {wl_stats['total']}\n\n"
@@ -7061,9 +7097,9 @@ def main():
         job_queue.run_repeating(send_reminder_1week, interval=timedelta(hours=6), first=timedelta(minutes=15))
         logger.info("Re-engagement reminders scheduled (24h, 72h, 1week)")
 
-    logger.info("PH-Bot v5.10.0 starting")
+    logger.info("PH-Bot v6.0.0 starting")
     logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
-    logger.info(f"Payment: FREE > €39 > €150 > €110 | Days left: {days_left()}")
+    logger.info(f"Payment: FREE > €29 > €69 > €99 | Days left: {days_left()} | BOE: {BOE_PUBLISHED}")
     logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
