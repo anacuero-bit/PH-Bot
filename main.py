@@ -2400,22 +2400,33 @@ import string
 
 
 def get_waitlist_count() -> int:
-    """Deterministic fake waitlist counter. Grows 50-200/day from base 3127."""
+    """Deterministic fake waitlist counter. Grows 50-200/day + 2-8/hour from base 3127."""
     import hashlib
-    from datetime import date, timedelta
+    from datetime import datetime, date, timedelta
 
     LAUNCH_DATE = date(2026, 2, 15)
     BASE_COUNT = 3127
 
-    days = (date.today() - LAUNCH_DATE).days
+    now = datetime.now()
+    today = now.date()
+    days = (today - LAUNCH_DATE).days
+
     if days < 0:
         return BASE_COUNT
 
     total = BASE_COUNT
+
     for day in range(days):
         seed = f"waitlist-{LAUNCH_DATE + timedelta(days=day)}"
         day_hash = int(hashlib.md5(seed.encode()).hexdigest(), 16)
         total += 50 + (day_hash % 151)
+
+    current_hour = now.hour
+    for hour in range(current_hour + 1):
+        seed = f"waitlist-{today}-{hour}"
+        hour_hash = int(hashlib.md5(seed.encode()).hexdigest(), 16)
+        total += 2 + (hour_hash % 7)
+
     return total
 
 
@@ -2786,8 +2797,8 @@ def build_referidos_text(stats: dict) -> str:
         "¿CÓMO FUNCIONA?\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "1️⃣ *COMPARTE* tu código con amigos que necesiten regularizarse\n\n"
-        "2️⃣ *ELLOS RECIBEN* €25 de descuento en su Fase 3\n\n"
-        "3️⃣ *TÚ GANAS* €25 de crédito cuando ellos paguen Fase 3"
+        "2️⃣ *ELLOS RECIBEN* €25 de descuento\n\n"
+        "3️⃣ *TÚ GANAS* €25 de crédito cuando completen el proceso"
     )
 
     activation_block = (
@@ -3013,6 +3024,7 @@ def doc_type_kb() -> InlineKeyboardMarkup:
 def main_menu_kb(user: Dict) -> InlineKeyboardMarkup:
     dc = get_doc_count(user["telegram_id"])
     btns = [
+        [InlineKeyboardButton("Continuar con mi proceso", callback_data="continue_process")],
         [InlineKeyboardButton("Mi checklist de documentos", callback_data="m_checklist")],
         [InlineKeyboardButton(f"Mis documentos ({dc})", callback_data="m_docs")],
         [InlineKeyboardButton("Subir documento", callback_data="m_upload")],
@@ -3027,6 +3039,7 @@ def main_menu_kb(user: Dict) -> InlineKeyboardMarkup:
 def faq_menu_kb() -> InlineKeyboardMarkup:
     """Show FAQ category buttons (accordion top level)."""
     btns = []
+    btns.append([InlineKeyboardButton("¿Que incluye cada fase?", callback_data="fq_fases")])
     for cat_key, cat in FAQ_CATEGORIES.items():
         btns.append([InlineKeyboardButton(cat["title"], callback_data=f"fcat_{cat_key}")])
     btns.append([InlineKeyboardButton("Volver al menu", callback_data="back")])
@@ -4048,7 +4061,7 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         f"*{name}, cumples los requisitos.*\n\n"
         f"Expediente: *{case['case_number']}*\n"
         f"Plazo: 1 abril — 30 junio 2026 ({days_left()} días)\n\n"
-        f"Actualmente hay más de {counter:,} personas en lista de espera.\n\n"
+        f"{counter:,} personas en lista de espera.\n\n"
         "*Siguiente paso:* sube tus documentos para tenerlos listos cuando abra el proceso.\n\n"
         "Subir documentos es gratuito.",
         parse_mode=ParseMode.MARKDOWN,
@@ -4076,7 +4089,7 @@ async def handle_waitlist(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int
 
     text = (
         "*LISTA DE ESPERA*\n\n"
-        f"Actualmente hay más de {counter:,} personas esperando.\n\n"
+        f"{counter:,} personas en lista de espera.\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "¿QUÉ SIGNIFICA?\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -4093,6 +4106,7 @@ async def handle_waitlist(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int
     )
 
     keyboard = [
+        [InlineKeyboardButton("Continuar con mi proceso", callback_data="continue_process")],
         [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
         [InlineKeyboardButton("Ver mis documentos", callback_data="m_docs")],
         [InlineKeyboardButton("Invitar amigos", callback_data="m_referidos")],
@@ -4174,6 +4188,30 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "waitlist" or d == "m_waitlist":
         return await handle_waitlist(update, ctx)
 
+    # Continue process — show next step info
+    if d == "continue_process":
+        tid = update.effective_user.id
+        counter = get_waitlist_count()
+        text = (
+            "*SIGUIENTE PASO: PAGO*\n\n"
+            "Tu siguiente paso es realizar el pago, pero el proceso "
+            "aún no está abierto.\n\n"
+            f"{counter:,} personas en lista de espera.\n\n"
+            "Cuando el BOE publique el Real Decreto "
+            "(previsto marzo/abril 2026):\n"
+            "• Notificaremos a todos simultáneamente\n"
+            "• Las primeras 1.000 en pagar aseguran plaza\n\n"
+            "Mientras tanto, asegúrate de tener todos tus documentos listos."
+        )
+        keyboard = [
+            [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
+            [InlineKeyboardButton("Ver mis documentos", callback_data="m_docs")],
+            [InlineKeyboardButton("Volver", callback_data="m_menu")],
+        ]
+        await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(keyboard))
+        return ST_WAITLIST
+
     # Block all payment paths → redirect to waitlist wall
     if d in ("m_pay2", "m_pay3", "m_pay4", "pay_full", "pay_bypass",
              "paid2", "paid2_free", "paid3", "paid4", "request_phase2",
@@ -4208,6 +4246,41 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     # Route eligibility Q3 callbacks
     if d.startswith("r_"):
         return await handle_q3(update, ctx)
+
+    # Phase FAQ — custom entry not in FAQ dict
+    if d == "fq_fases":
+        text = (
+            "*¿QUÉ INCLUYE CADA FASE?*\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "FASE 1 — GRATIS\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Comprobamos tu elegibilidad y subes tus documentos.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"FASE 2 — €{PRICING['phase2']}\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Evaluación de tu caso. Informe con probabilidad de "
+            "éxito y documentos pendientes.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"FASE 3 — €{PRICING['phase3']}\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Expediente preparado: formularios cumplimentados, "
+            "documentos organizados.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"FASE 4 — €{PRICING['phase4']}\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Memoria legal personalizada, presentación, seguimiento "
+            "hasta resolución. Recurso incluido.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"PAGO ÚNICO — €{PRICING['prepay_total']}\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"Todas las fases incluidas. Ahorras €{PRICING['prepay_discount']}."
+        )
+        await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Todas las categorias", callback_data="m_faq")],
+                [InlineKeyboardButton("Menu principal", callback_data="back")],
+            ]))
+        return ST_FAQ_ITEM
 
     # FAQ callback routing (from eligibility screen and other places)
     if d.startswith("fq_"):
