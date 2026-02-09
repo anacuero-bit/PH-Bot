@@ -955,17 +955,7 @@ PRICING_EXPLANATION = (
     "*Opción 2: Pago único* ⭐ RECOMENDADO\n"
     f"• Todo incluido: *€{PRICING['prepay_total']}*\n"
     f"• Ahorras €{PRICING['prepay_discount']} ({round(PRICING['prepay_discount']/PRICING['total_phases']*100)}%)\n\n"
-    "━━━━━━━━━━━━━━━━━━━━\n"
-    "🛠️ SERVICIOS ADICIONALES\n"
-    "━━━━━━━━━━━━━━━━━━━━\n\n"
-    "Opcionales, para quien los necesite:\n\n"
-    f"• Antecedentes España: *€{PRICING['antecedentes_spain']}*\n"
-    "  (Lo tramitamos por ti)\n\n"
-    f"• Antecedentes país de origen: *€{PRICING['antecedentes_foreign']}*\n"
-    "  (Solicitud + apostilla + traducción)\n\n"
-    f"• Gestión de tasas gubernamentales: *€{PRICING['govt_fees_service']}*\n"
-    "  (Pagamos las tasas 790 por ti)\n\n"
-    f"• Traducción jurada: *€{PRICING['translation_per_doc']}/documento*\n\n"
+    # NOTE: Servicios adicionales pricing hidden from user display (kept in PRICING dict)
     "━━━━━━━━━━━━━━━━━━━━\n"
     "🏛️ TASAS DEL GOBIERNO (aparte)\n"
     "━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -2793,38 +2783,17 @@ def build_referidos_text(stats: dict) -> str:
 
     how_block = (
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "💡 ¿CÓMO FUNCIONA?\n"
+        "¿CÓMO FUNCIONA?\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "1️⃣ *COMPARTE* tu código con amigos que necesiten regularizarse\n\n"
-        "2️⃣ *ELLOS RECIBEN* €25 de descuento en su primer pago\n\n"
-        "3️⃣ *TÚ GANAS* €25 de crédito por cada amigo que pague"
+        "2️⃣ *ELLOS RECIBEN* €25 de descuento en su Fase 3\n\n"
+        "3️⃣ *TÚ GANAS* €25 de crédito cuando ellos paguen Fase 3"
     )
 
-    if can_earn:
-        activation_block = (
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "✅ TU CÓDIGO ESTÁ *ACTIVO*\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Cada vez que un amigo pague usando tu código, ganas €25 de crédito "
-            "que se aplica automáticamente a tus próximos pagos.\n\n"
-            "*Con 8 amigos = tu servicio completo es GRATIS*\n\n"
-            "¡Comparte ahora!"
-        )
-    else:
-        activation_block = (
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "🔓 ACTIVAR TUS GANANCIAS\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"Para empezar a ganar créditos, primero debes pagar tu Fase 2 (€{PRICING['phase2']}).\n\n"
-            "*¿Por qué?* Queremos asegurar que solo usuarios comprometidos con el "
-            "proceso puedan ganar créditos. Esto evita fraudes y garantiza un sistema "
-            "justo para todos.\n\n"
-            f"Una vez pagues tu €{PRICING['phase2']}:\n"
-            "• Tu código se activa permanentemente\n"
-            "• Empiezas a ganar €25 por cada amigo que pague\n"
-            f"• Puedes acumular hasta €{PRICING['referral_max']} en créditos (¡servicio completo gratis!)\n\n"
-            "*Con 8 amigos = tu servicio completo es GRATIS*"
-        )
+    activation_block = (
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Comparte ahora. Los créditos se acumulan para cuando abra el proceso."
+    )
 
     text = (
         f"👥 *Tus Referidos*\n\n"
@@ -4080,7 +4049,7 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         f"Expediente: *{case['case_number']}*\n"
         f"Plazo: 1 abril — 30 junio 2026 ({days_left()} días)\n\n"
         f"Actualmente hay más de {counter:,} personas en lista de espera.\n\n"
-        "*Siguiente paso:* sube tus documentos para adelantar tu posición.\n\n"
+        "*Siguiente paso:* sube tus documentos para tenerlos listos cuando abra el proceso.\n\n"
         "Subir documentos es gratuito.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
@@ -4416,6 +4385,21 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ST_FAQ_MENU
 
     if d == "m_contact":
+        tid = update.effective_user.id
+        u = get_user(tid)
+        if not u or not u.get("phase2_paid"):
+            await q.edit_message_text(
+                "*Consulta con abogado*\n\n"
+                "La consulta con abogado está disponible para clientes "
+                "a partir de Fase 2.\n\n"
+                "Cuando el proceso sea oficial y completes tu pago, "
+                "tendrás acceso a consultas personalizadas con nuestro "
+                "equipo legal.",
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Volver", callback_data="back")],
+                ]))
+            return ST_MAIN_MENU
         await q.edit_message_text(
             "*¿Tienes una consulta para nuestro equipo legal?*\n\n"
             "Escribe tu mensaje aquí y lo trasladaremos a un abogado:",
@@ -5036,12 +5020,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         position = get_waitlist_position(tid)
         await notify_admins(ctx, f"⏳ *Nuevo en lista de espera*\nUsuario: {name} ({tid})\nPosición: #{position}\nDocs: {dc}")
         await q.edit_message_text(
-            f"✅ *Estás en la lista de espera*\n\n"
-            f"Tu posición: *#{position}*\n\n"
+            f"*Estás en la lista de espera*\n\n"
             "Tus documentos están guardados.\n"
-            "Te avisaremos por este chat cuando haya plaza.\n\n"
-            "Mientras tanto, puedes seguir subiendo documentos.\n"
-            "Cuanto más preparado estés, más rápido será el proceso.",
+            "Te avisaremos por este chat cuando el proceso sea oficial.\n\n"
+            "Mientras tanto, sigue subiendo documentos para tenerlo todo listo.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Subir mas documentos", callback_data="m_upload")],
@@ -5447,7 +5429,7 @@ async def handle_photo_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text(
         f"*Documento guardado.*\n\n"
         f"Documentos aportados: {dc}\n\n"
-        "Puedes seguir subiendo documentos o ver tu posición en la lista de espera.",
+        "Puedes seguir subiendo documentos o ver la lista de espera.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(response_btns),
     )
@@ -5513,7 +5495,7 @@ async def handle_file_upload(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> 
     await update.message.reply_text(
         f"*Documento guardado.*\n\n"
         f"Documentos aportados: {dc}\n\n"
-        "Puedes seguir subiendo documentos o ver tu posición en la lista de espera.",
+        "Puedes seguir subiendo documentos o ver la lista de espera.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup(response_btns2),
     )
