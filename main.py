@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v6.0.0 — Client Intake & Case Management
+PH-Bot v6.1.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
-Updated:    2026-02-09
+Updated:    2026-02-14
 
 CHANGELOG:
 ----------
+v6.1.0 (2026-02-14)
+  - REFERRAL OVERHAUL: Replace €25 credit system with Cónsul/Embajador tiers
+  - NEW: Tier thresholds (Cónsul: 3 friends, Embajador: 10 friends)
+  - NEW: Tier status locked until referrer pays full
+  - NEW: €199 prepay = instant Cónsul
+  - NEW: Friend discount applies to Phase 4 only (€25 off)
+  - NEW: Database columns for tier tracking
+  - REMOVED: Credit accumulation, credit cap, cash percentage
+  - UPDATED: Referidos screen shows tier progress
+  - UPDATED: Share text clarifies "€25 off Phase 4"
+
 v6.0.0 (2026-02-09)
   - MVP overhaul for pre-BOE launch
   - Added waitlist wall (blocks Phase 2+ until BOE publishes)
@@ -392,13 +403,29 @@ STRIPE_LINKS = {
 ) = range(27)
 
 # =============================================================================
-# REFERRAL SYSTEM
+# REFERRAL SYSTEM — Cónsul/Embajador Tiers
 # =============================================================================
 
-REFERRAL_CREDIT_AMOUNT = 25      # €25 per referral
-REFERRAL_CREDIT_CAP = 299        # Max credits (full service)
-REFERRAL_CASH_PERCENT = 0.10     # 10% cash after cap
-REFERRAL_FRIEND_DISCOUNT = 25    # €25 off for friend
+CONSUL_THRESHOLD = 3              # Friends who paid Phase 2 to reach Cónsul
+EMBAJADOR_THRESHOLD = 10          # Friends who paid Phase 2 to reach Embajador
+EMBAJADOR_FULL_PAY_THRESHOLD = 5  # OR friends who paid full (€199/€247)
+FRIEND_DISCOUNT = 25              # €25 off Phase 4 for referred friend
+
+TIER_BENEFITS = {
+    "consul": [
+        "Procesamiento prioritario",
+        "Respuesta urgente a requerimientos",
+        "Revisión extra de documentos",
+        "WhatsApp directo con el equipo",
+    ],
+    "embajador": [
+        "Todo lo de Cónsul, más:",
+        "Gestor de caso dedicado",
+        "Aparición en nuestra web",
+        "Certificado de Embajador",
+        "Descuento de por vida en servicios",
+    ],
+}
 
 # =============================================================================
 # COUNTRY DATA (no slang greetings — professional tone)
@@ -1475,18 +1502,21 @@ FAQ = {
 
     # === REFERRAL (kept for /referidos command) ===
     "referidos": {
-        "title": "Programa de referidos",
-        "keywords": ["referido", "código", "amigo", "descuento", "compartir", "ganar", "crédito"],
+        "title": "Programa Diplomático",
+        "keywords": ["referido", "código", "amigo", "descuento", "compartir", "cónsul", "embajador", "tier"],
         "text": (
-            "*Programa de referidos:*\n\n"
+            "*Programa Diplomático*\n\n"
             "*Para tu amigo:*\n"
-            "Si alguien usa tu código al registrarse, recibe €25 de descuento "
-            "en Fase 3 (expediente).\n\n"
-            "*Para ti:*\n"
-            "Cuando tu amigo pague Fase 3, ganas €25 de crédito "
-            "que se aplica a tus siguientes pagos.\n\n"
-            f"Máximo: €{PRICING['referral_max']} en créditos (10 amigos = servicio gratis).\n\n"
-            "Puedes ver tu código y estadísticas con el comando /referidos."
+            f"€{FRIEND_DISCOUNT} de descuento en Fase 4 (€129 → €104).\n\n"
+            "*Para ti — Cónsul (3 amigos):*\n"
+            "Procesamiento prioritario, respuesta urgente, "
+            "revisión extra, WhatsApp directo.\n\n"
+            "*Para ti — Embajador (10 amigos):*\n"
+            "Todo lo de Cónsul + gestor dedicado, "
+            "aparición en web, certificado, descuento de por vida.\n\n"
+            "Tu estatus se activa cuando completes tu pago.\n"
+            "€199 pago único = Cónsul automático.\n\n"
+            "Usa /referidos para ver tu código y progreso."
         ),
     },
 }
@@ -1684,6 +1714,20 @@ def init_db():
             conn.commit()
         except Exception:
             conn.rollback()  # Reset transaction state for PostgreSQL
+
+    # Cónsul/Embajador tier columns
+    tier_columns = [
+        ("referral_tier", "VARCHAR(20) DEFAULT NULL"),
+        ("referral_tier_locked", "INTEGER DEFAULT 1"),
+        ("referrals_phase2_count", "INTEGER DEFAULT 0"),
+        ("referrals_full_count", "INTEGER DEFAULT 0"),
+    ]
+    for col_name, col_type in tier_columns:
+        try:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
     # Create referrals table
     if USE_POSTGRES:
@@ -2525,7 +2569,7 @@ def apply_referral_code_to_user(user_id: int, code: str, referrer_id: int) -> bo
 
 
 def get_referral_stats(user_id: int) -> dict:
-    """Get referral statistics for a user."""
+    """Get referral statistics for a user — tier system."""
     conn = get_connection()
     c = conn.cursor()
     p = db_param()
@@ -2539,6 +2583,7 @@ def get_referral_stats(user_id: int) -> dict:
 
     user = _row_to_dict(row, c)
 
+    # Get list of referrals
     c.execute(f"""
         SELECT r.*, u.first_name as referred_name
         FROM referrals r
@@ -2550,31 +2595,38 @@ def get_referral_stats(user_id: int) -> dict:
 
     conn.close()
 
-    earned = float(user.get('referral_credits_earned') or 0)
-    used = float(user.get('referral_credits_used') or 0)
-
     return {
         'code': user.get('referral_code'),
-        'count': user.get('referral_count') or 0,
-        'credits_earned': earned,
-        'credits_used': used,
-        'credits_available': max(0, earned - used),
-        'cash_earned': user.get('referral_cash_earned') or 0,
-        'can_earn': user.get('phase2_paid') == 1,
-        'referrals': referrals
+        'referral_tier': user.get('referral_tier'),
+        'referral_tier_locked': user.get('referral_tier_locked', 1) == 1,
+        'referrals_phase2_count': user.get('referrals_phase2_count', 0),
+        'referrals_full_count': user.get('referrals_full_count', 0),
+        'referral_count': user.get('referral_count', 0),
+        'referrals': referrals,
+        'credits_earned': 0,
+        'credits_used': 0,
+        'credits_available': 0,
     }
 
 
 def credit_referrer(referred_user_id: int, payment_amount: float) -> dict:
-    """Credit referrer when friend pays."""
+    """DEPRECATED: Wrapper for backward compat. Calls update_referrer_progress."""
+    return update_referrer_progress(referred_user_id, 'phase2')
+
+
+def update_referrer_progress(referred_user_id: int, payment_type: str) -> dict:
+    """
+    Update referrer's tier progress when friend makes a payment.
+    payment_type: 'phase2' or 'full'
+    """
     conn = get_connection()
     c = conn.cursor()
     p = db_param()
 
     try:
         c.execute(f"""
-            SELECT r.referrer_user_id, r.credit_amount,
-                   u.phase2_paid, u.referral_credits_earned
+            SELECT r.referrer_user_id, u.referrals_phase2_count, u.referrals_full_count,
+                   u.referral_tier
             FROM referrals r
             JOIN users u ON r.referrer_user_id = u.telegram_id
             WHERE r.referred_user_id = {p}
@@ -2583,60 +2635,108 @@ def credit_referrer(referred_user_id: int, payment_amount: float) -> dict:
         row = c.fetchone()
         if not row:
             conn.close()
-            return {'credited': False, 'reason': 'no_referrer'}
+            return {'updated': False, 'reason': 'no_referrer'}
 
         referrer_id = row[0]
-        existing_credit = row[1] or 0
-        phase2_paid = row[2] == 1
-        credits_earned = float(row[3] or 0)
+        phase2_count = (row[1] or 0)
+        full_count = (row[2] or 0)
+        current_tier = row[3]
 
-        if not phase2_paid:
-            conn.close()
-            return {'credited': False, 'reason': 'referrer_not_eligible'}
+        if payment_type == 'phase2':
+            phase2_count += 1
+            c.execute(f"""
+                UPDATE users
+                SET referrals_phase2_count = {p}, referral_count = referral_count + 1
+                WHERE telegram_id = {p}
+            """, (phase2_count, referrer_id))
+        elif payment_type == 'full':
+            full_count += 1
+            c.execute(f"""
+                UPDATE users SET referrals_full_count = {p} WHERE telegram_id = {p}
+            """, (full_count, referrer_id))
 
-        if existing_credit > 0:
-            conn.close()
-            return {'credited': False, 'reason': 'already_credited'}
+        new_tier = current_tier
+        if full_count >= EMBAJADOR_FULL_PAY_THRESHOLD or phase2_count >= EMBAJADOR_THRESHOLD:
+            new_tier = 'embajador'
+        elif phase2_count >= CONSUL_THRESHOLD:
+            new_tier = 'consul'
 
-        if credits_earned >= REFERRAL_CREDIT_CAP:
-            conn.close()
-            return {'credited': False, 'reason': 'cap_reached'}
-
-        credit_amount = min(REFERRAL_CREDIT_AMOUNT, REFERRAL_CREDIT_CAP - credits_earned)
-
-        c.execute(f"""
-            UPDATE referrals
-            SET credit_amount = {p}, status = 'paid_phase2',
-                credit_awarded_at = CURRENT_TIMESTAMP,
-                friend_total_paid = {p}
-            WHERE referred_user_id = {p}
-        """, (credit_amount, payment_amount, referred_user_id))
-
-        c.execute(f"""
-            UPDATE users
-            SET referral_credits_earned = referral_credits_earned + {p},
-                referral_count = referral_count + 1
-            WHERE telegram_id = {p}
-        """, (credit_amount, referrer_id))
+        if new_tier != current_tier:
+            c.execute(f"""
+                UPDATE users SET referral_tier = {p} WHERE telegram_id = {p}
+            """, (new_tier, referrer_id))
 
         c.execute(f"""
-            INSERT INTO referral_events (user_id, event_type, amount, description)
-            VALUES ({p}, 'credit_earned', {p}, 'Friend paid')
-        """, (referrer_id, credit_amount))
+            UPDATE referrals SET status = {p} WHERE referred_user_id = {p}
+        """, (f'paid_{payment_type}', referred_user_id))
+
+        c.execute(f"""
+            INSERT INTO referral_events (user_id, event_type, description)
+            VALUES ({p}, {p}, {p})
+        """, (referrer_id, f'friend_paid_{payment_type}', f'Friend {referred_user_id} paid {payment_type}'))
 
         conn.commit()
-        return {'credited': True, 'amount': credit_amount, 'referrer_id': referrer_id}
+
+        return {
+            'updated': True,
+            'referrer_id': referrer_id,
+            'new_tier': new_tier,
+            'tier_changed': new_tier != current_tier,
+            'phase2_count': phase2_count,
+            'full_count': full_count,
+        }
 
     except Exception as e:
         conn.rollback()
-        logger.error(f"Error crediting referrer: {e}")
-        return {'credited': False, 'reason': 'error'}
+        logger.error(f"Error updating referrer progress: {e}")
+        return {'updated': False, 'reason': 'error'}
+    finally:
+        conn.close()
+
+
+def unlock_referrer_tier(user_id: int, instant_consul: bool = False) -> dict:
+    """
+    Unlock referrer's tier when they complete their payment.
+    instant_consul: True if user paid €199 prepay (gets Cónsul automatically)
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+
+    try:
+        if instant_consul:
+            c.execute(f"""
+                UPDATE users
+                SET referral_tier = COALESCE(
+                    CASE WHEN referral_tier = 'embajador' THEN 'embajador' ELSE 'consul' END,
+                    'consul'
+                ),
+                referral_tier_locked = 0
+                WHERE telegram_id = {p}
+            """, (user_id,))
+        else:
+            c.execute(f"""
+                UPDATE users SET referral_tier_locked = 0 WHERE telegram_id = {p}
+            """, (user_id,))
+
+        conn.commit()
+
+        c.execute(f"SELECT referral_tier FROM users WHERE telegram_id = {p}", (user_id,))
+        row = c.fetchone()
+        tier = row[0] if row else None
+
+        return {'unlocked': True, 'tier': tier}
+
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error unlocking tier: {e}")
+        return {'unlocked': False}
     finally:
         conn.close()
 
 
 def get_friend_discount(user_id: int) -> dict:
-    """Check if user has friend discount available."""
+    """Check if user has friend discount available (€25 off Phase 4 only)."""
     conn = get_connection()
     c = conn.cursor()
     p = db_param()
@@ -2653,11 +2753,12 @@ def get_friend_discount(user_id: int) -> dict:
     conn.close()
 
     if not row or not row[0] or row[1]:
-        return {'has_discount': False}
+        return {'has_discount': False, 'phase': None}
 
     return {
         'has_discount': True,
-        'amount': REFERRAL_FRIEND_DISCOUNT,
+        'amount': FRIEND_DISCOUNT,
+        'phase': 4,
         'referrer_name': row[2] or 'un amigo'
     }
 
@@ -2674,52 +2775,26 @@ def apply_friend_discount(user_id: int) -> bool:
 
 
 def apply_credits_to_payment(user_id: int, price: float) -> dict:
-    """Calculate price after applying credits."""
-    conn = get_connection()
-    c = conn.cursor()
-    p = db_param()
-
-    c.execute(f"SELECT referral_credits_earned, referral_credits_used FROM users WHERE telegram_id = {p}", (user_id,))
-    row = c.fetchone()
-    conn.close()
-
-    if not row:
-        return {'original': price, 'credits_applied': 0, 'final_price': price, 'credits_remaining': 0}
-
-    earned = float(row[0] or 0)
-    used = float(row[1] or 0)
-    available = earned - used
-
-    if available <= 0:
-        return {'original': price, 'credits_applied': 0, 'final_price': price, 'credits_remaining': 0}
-
-    to_apply = min(available, price)
-    final = price - to_apply
-
+    """DEPRECATED: Credit system replaced with tier system. Returns no discount."""
     return {
         'original': price,
-        'credits_applied': to_apply,
-        'final_price': final,
-        'credits_remaining': available - to_apply
+        'credits_applied': 0,
+        'final_price': price,
+        'credits_remaining': 0
     }
 
 
 def mark_credits_used(user_id: int, amount: float):
-    """Mark credits as used after payment."""
-    conn = get_connection()
-    c = conn.cursor()
-    p = db_param()
-    c.execute(f"UPDATE users SET referral_credits_used = referral_credits_used + {p} WHERE telegram_id = {p}", (amount, user_id))
-    c.execute(f"INSERT INTO referral_events (user_id, event_type, amount, description) VALUES ({p}, 'credit_applied', {p}, 'Payment')", (user_id, amount))
-    conn.commit()
-    conn.close()
+    """DEPRECATED: Credit system replaced with tier system. No-op."""
+    pass
 
 
 def get_share_text(code: str) -> str:
     """Standard share message text for all platforms."""
     return (
         f"¡Hola! 👋 Te comparto mi código para la regularización 2026 en España. "
-        f"Con el código {code} tienes €25 de descuento. Es 100% online y muy fácil. "
+        f"Con el código {code} tienes €{FRIEND_DISCOUNT} de descuento en tu Fase 4. "
+        f"Es 100% online y muy fácil. "
         f"👉 tuspapeles2026.es/r.html?code={code}"
     )
 
@@ -2736,7 +2811,7 @@ def get_telegram_share_url(code: str) -> str:
     return (
         f"https://t.me/share/url?"
         f"url={urllib.parse.quote(f'https://t.me/TusPapeles2026Bot?start={code}')}"
-        f"&text={urllib.parse.quote('Usa mi código para €25 de descuento')}"
+        f"&text={urllib.parse.quote(f'Usa mi código para €{FRIEND_DISCOUNT} de descuento en Fase 4')}"
     )
 
 
@@ -2774,44 +2849,64 @@ def get_share_buttons(code: str) -> list:
 
 
 def build_referidos_text(stats: dict) -> str:
-    """Build the comprehensive referidos screen text — different for paid vs unpaid."""
-    code = stats['code']
-    count = stats['count']
-    earned = stats['credits_earned']
-    used = stats['credits_used']
-    available = stats['credits_available']
-    can_earn = stats['can_earn']
+    """Build the referidos screen text — Cónsul/Embajador tier system."""
+    code = stats.get('code', '')
+    phase2_count = stats.get('referrals_phase2_count', 0)
+    full_count = stats.get('referrals_full_count', 0)
+    tier = stats.get('referral_tier')
+    tier_locked = stats.get('referral_tier_locked', True)
 
-    stats_block = (
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📊 TUS ESTADÍSTICAS\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"Amigos referidos: {count}\n"
-        f"Crédito ganado: €{earned}\n"
-        f"Crédito usado: €{used}\n"
-        f"Crédito disponible: €{available}"
-    )
+    # Determine display tier
+    if tier == 'embajador':
+        tier_display = "⭐⭐ EMBAJADOR"
+    elif tier == 'consul':
+        tier_display = "⭐ CÓNSUL"
+    else:
+        tier_display = "Sin estatus"
 
-    how_block = (
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "¿CÓMO FUNCIONA?\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "1️⃣ *COMPARTE* tu código con amigos que necesiten regularizarse\n\n"
-        "2️⃣ *ELLOS RECIBEN* €25 de descuento\n\n"
-        "3️⃣ *TÚ GANAS* €25 de crédito cuando completen el proceso"
-    )
+    # Progress message
+    if tier == 'embajador':
+        progress_msg = "¡Máximo nivel alcanzado!"
+    elif phase2_count >= CONSUL_THRESHOLD:
+        remaining = EMBAJADOR_THRESHOLD - phase2_count
+        progress_msg = f"Cónsul alcanzado. {remaining} más para Embajador."
+    else:
+        remaining = CONSUL_THRESHOLD - phase2_count
+        progress_msg = f"{remaining} amigo(s) más para Cónsul"
 
-    activation_block = (
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Comparte ahora. Los créditos se acumulan para cuando abra el proceso."
-    )
+    # Lock status
+    if tier and tier_locked:
+        lock_msg = "\n🔒 _Tu estatus se activa cuando completes tu pago._"
+    elif tier and not tier_locked:
+        lock_msg = "\n✅ _Estatus activo_"
+    else:
+        lock_msg = ""
 
     text = (
-        f"👥 *Tus Referidos*\n\n"
+        f"🏛️ *Programa Diplomático*\n\n"
         f"Tu código personal: `{code}`\n\n"
-        f"{stats_block}\n\n"
-        f"{how_block}\n\n"
-        f"{activation_block}"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"📊 TU PROGRESO\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Amigos que pagaron Fase 2: {phase2_count}\n"
+        f"Amigos que pagaron completo: {full_count}\n\n"
+        f"Estatus: *{tier_display}*\n"
+        f"{progress_msg}{lock_msg}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏛️ NIVELES\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"⭐ *CÓNSUL* (3 amigos)\n"
+        f"Procesamiento prioritario, respuesta urgente,\n"
+        f"revisión extra, WhatsApp directo.\n\n"
+        f"⭐⭐ *EMBAJADOR* (10 amigos)\n"
+        f"Todo lo de Cónsul + gestor dedicado,\n"
+        f"aparición en web, certificado, descuento de por vida.\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎁 BENEFICIO PARA TU AMIGO\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"€{FRIEND_DISCOUNT} de descuento en Fase 4\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Comparte tu código. Ayuda a tu comunidad."
     )
     return text
 
@@ -4102,7 +4197,7 @@ async def handle_waitlist(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int
         "¿QUÉ PUEDES HACER AHORA?\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         f"• Subir documentos — tenlos listos ({doc_count} subidos)\n"
-        f"• Invitar amigos — €{PRICING['referral_credit']} descuento por cada uno"
+        f"• Invitar amigos — €{FRIEND_DISCOUNT} descuento en Fase 4 para ellos"
     )
 
     keyboard = [
@@ -4581,7 +4676,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Te vamos a hacer unas preguntas sobre tu situación personal. "
             "Con tus respuestas + tus documentos, generaremos un *informe de evaluación personalizado*.\n\n"
             f"💡 Tu código de referidos: `{code}`\n"
-            f"Cuando un amigo pague Fase 3, ambos ganáis €{PRICING['referral_credit']}.",
+            f"Tu amigo recibe €{FRIEND_DISCOUNT} de descuento en Fase 4.",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Comenzar cuestionario", callback_data="start_questionnaire")],
@@ -4602,7 +4697,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "• Puesto reservado en cola de presentación.\n\n"
         )
         if code:
-            text += f"💡 _Recuerda: ganas €{PRICING['referral_credit']} por cada amigo que pague. Tu código: `{code}`_\n\n"
+            text += f"💡 _Comparte tu código `{code}` — tus amigos reciben €{FRIEND_DISCOUNT} de descuento en Fase 4._\n\n"
         if STRIPE_LINKS["phase3"]:
             text += "Pulse *Pagar con tarjeta* para un pago seguro instantáneo."
         else:
@@ -4624,14 +4719,24 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         u = get_user(tid)
         code = u.get("referral_code", "") if u else ""
 
-        # Credit the referrer on Phase 3 payment (anti-gaming)
-        result = credit_referrer(tid, 150)
-        if result.get('credited'):
+        # Update referrer tier progress on Phase 2 payment
+        result = update_referrer_progress(tid, 'phase2')
+        if result.get('updated') and result.get('tier_changed'):
             try:
-                user_data = get_user(tid)
+                tier_name = "EMBAJADOR" if result['new_tier'] == 'embajador' else "CÓNSUL"
                 await ctx.bot.send_message(
                     result['referrer_id'],
-                    f"🎉 Tu amigo {user_data.get('first_name', 'alguien')} completó Fase 3. +€{result['amount']} crédito.",
+                    f"🎉 ¡Felicidades! Has alcanzado el estatus *{tier_name}*.\n\n"
+                    f"Tu estatus se activará cuando completes tu pago.",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+            except Exception as e:
+                logger.error(f"Failed to notify referrer of tier change: {e}")
+        elif result.get('updated'):
+            try:
+                await ctx.bot.send_message(
+                    result['referrer_id'],
+                    f"👥 ¡Un amigo pagó Fase 2! Progreso: {result['phase2_count']}/{CONSUL_THRESHOLD} para Cónsul.",
                 )
             except Exception as e:
                 logger.error(f"Failed to notify referrer: {e}")
@@ -4641,7 +4746,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"Usuario: {user.get('first_name')}\n"
             f"TID: {tid}\n"
             f"Aprobar: `/approve3 {tid}`")
-        referral_line = f"\n💡 Tu código de referidos: `{code}` — invita amigos y gana €{PRICING['referral_credit']} por cada uno." if code else ""
+        referral_line = f"\n💡 Tu código de referidos: `{code}` — tus amigos reciben €{FRIEND_DISCOUNT} de descuento en Fase 4." if code else ""
         await q.edit_message_text(
             "✅ *Pago recibido.*\n\n"
             "Ahora viene la preparación de tu expediente. Te haremos unas "
@@ -4659,8 +4764,17 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         dl = days_left()
         u = get_user(update.effective_user.id)
         code = u.get("referral_code", "") if u else ""
+
+        friend_disc = get_friend_discount(update.effective_user.id)
+        if friend_disc['has_discount'] and friend_disc['phase'] == 4:
+            base_price = PRICING['phase4'] - friend_disc['amount']
+            discount_msg = f"\n🎁 Descuento de amigo: -€{friend_disc['amount']}"
+        else:
+            base_price = PRICING['phase4']
+            discount_msg = ""
+
         text = (
-            f"*Presentación de solicitud — €{PRICING['phase4']}*\n\n"
+            f"*Presentación de solicitud — €{base_price}*\n\n"
             f"Su expediente está listo. Quedan *{dl} días* hasta el cierre del plazo.\n\n"
             "Con este pago final, realizaremos:\n\n"
             "• Presentación telemática oficial ante Extranjería.\n"
@@ -4670,8 +4784,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"📦 *¿Quieres todo incluido?* Por €{PRICING['phase4_bundle']} te gestionamos "
             "también las tasas del gobierno.\n\n"
         )
+        if discount_msg:
+            text += f"{discount_msg}\n\n"
         if code:
-            text += f"💡 _Invita amigos con tu código `{code}` y gana €{PRICING['referral_credit']} por cada uno._\n\n"
+            text += f"💡 _Invita amigos con tu código `{code}`._\n\n"
         if STRIPE_LINKS["phase4"]:
             text += "Pulse *Pagar con tarjeta* para un pago seguro instantáneo."
         else:
@@ -4694,6 +4810,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     if d == "paid4":
         tid = update.effective_user.id
         update_user(tid, state="phase4_pending")
+
+        # Unlock tier when user completes full payment
+        unlock_referrer_tier(tid, instant_consul=False)
+
         u = get_user(tid)
         code = u.get("referral_code", "") if u else ""
         await notify_admins(ctx,
@@ -4701,7 +4821,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             f"Usuario: {user.get('first_name')}\n"
             f"TID: {tid}\n"
             f"Aprobar: `/approve4 {tid}`")
-        referral_line = f"\n\n💡 _Invita amigos con tu código `{code}` — ganan €{PRICING['referral_discount']} de descuento y tú ganas €{PRICING['referral_credit']}._" if code else ""
+        referral_line = f"\n\n💡 _Invita amigos con tu código `{code}` — ganan €{FRIEND_DISCOUNT} de descuento en Fase 4._" if code else ""
         await q.edit_message_text(
             "✅ *Pago recibido.*\n\n"
             "Lo verificaremos y procederemos a presentar su solicitud. "
@@ -4735,6 +4855,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         btns.append([InlineKeyboardButton(f"Bizum: {BIZUM_PHONE}", callback_data="show_bizum")])
         btns.append([InlineKeyboardButton("Tengo dudas", callback_data="m_contact")])
         btns.append([InlineKeyboardButton("Volver", callback_data="back")])
+
+        # €199 prepay = instant Cónsul
+        unlock_referrer_tier(tid, instant_consul=True)
+
         await q.edit_message_text(
             f"💳 *Pago Único — €{price}*\n\n"
             "Incluye todas las fases hasta tu resolución:\n"
