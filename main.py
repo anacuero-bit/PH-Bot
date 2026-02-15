@@ -1,13 +1,32 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v6.1.1 — Client Intake & Case Management
+PH-Bot v6.2.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
 Updated:    2026-02-15
 
 CHANGELOG:
 ----------
+v6.2.0 (2026-02-15)
+  - NEW: /admin — list all admin commands with usage
+  - NEW: /deleteuser <tid> — delete user + all data (docs, cases, messages, referrals, waitlist)
+  - NEW: /resetuser <tid> — reset user to welcome screen, keep message history
+  - NEW: /search <name> — find users by name
+  - NEW: /users [page] — paginated list of all registered users
+  - NEW: /pending — users with unconfirmed payments awaiting approval
+  - NEW: /setphase <tid> <phase> — manually override user phase
+  - NEW: /note <tid> <text> — add internal admin note to user
+  - NEW: /funnel — conversion funnel breakdown
+  - NEW: /recent [N] — activity feed (last N signups, docs, payments)
+  - NEW: /countries — user breakdown by nationality
+  - NEW: /revenue — detailed revenue with projections
+  - NEW: /broadcasteligible <msg> — broadcast to eligible unpaid users only
+  - NEW: /broadcastpaid <msg> — broadcast to paying users only
+  - NEW: /broadcastcountry <code> <msg> — broadcast by nationality
+  - NEW: /export — export all user data as CSV file
+  - FIX: delete_user now also cleans referrals, referral_events, waitlist tables
+
 v6.1.1 (2026-02-15)
   - FIX: Remove scammy "race to pay" urgency language
   - FIX: Remove confusing percentage from document list display
@@ -2232,6 +2251,23 @@ def delete_user(tid: int):
         c.execute(f"DELETE FROM documents WHERE user_id = {p}", (uid,))
         c.execute(f"DELETE FROM cases WHERE user_id = {p}", (uid,))
         c.execute(f"DELETE FROM messages WHERE user_id = {p}", (uid,))
+        # Clean referral tables (both as referrer and referred)
+        try:
+            c.execute(f"DELETE FROM referrals WHERE referrer_user_id = {p}", (tid,))
+        except Exception:
+            pass
+        try:
+            c.execute(f"DELETE FROM referrals WHERE referred_user_id = {p}", (tid,))
+        except Exception:
+            pass
+        try:
+            c.execute(f"DELETE FROM referral_events WHERE user_id = {p}", (tid,))
+        except Exception:
+            pass
+        try:
+            c.execute(f"DELETE FROM waitlist WHERE telegram_id = {p}", (tid,))
+        except Exception:
+            pass
         c.execute(f"DELETE FROM users WHERE id = {p}", (uid,))
     conn.commit()
     conn.close()
@@ -6210,6 +6246,586 @@ async def cmd_broadcast(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Enviado: {sent} | Fallido: {failed}")
 
 
+# =============================================================================
+# ADMIN COMMANDS — v6.2.0 Management Panel
+# =============================================================================
+
+async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """List all admin commands."""
+    if update.effective_user.id not in ADMIN_IDS: return
+    text = (
+        "🔧 *ADMIN COMMANDS*\n\n"
+        "*Usuarios:*\n"
+        "/user <tid> — Ver perfil completo\n"
+        "/search <nombre> — Buscar por nombre\n"
+        "/users [página] — Lista paginada\n"
+        "/pending — Pagos pendientes de aprobar\n"
+        "/deleteuser <tid> — Eliminar usuario y datos\n"
+        "/resetuser <tid> — Reiniciar a pantalla de bienvenida\n"
+        "/setphase <tid> <fase> — Cambiar fase manualmente\n"
+        "/note <tid> <texto> — Añadir nota interna\n\n"
+        "*Pagos:*\n"
+        "/approve2 <tid> — Aprobar Fase 2\n"
+        "/approve3 <tid> — Aprobar Fase 3\n"
+        "/approve4 <tid> — Aprobar Fase 4\n"
+        "/ready <tid> — Marcar expediente como listo\n\n"
+        "*Documentos:*\n"
+        "/docs <tid> — Ver documentos de usuario\n"
+        "/doc <file\\_id> — Ver archivo\n"
+        "/ver <doc\\_id> — Detalle de documento\n"
+        "/pendientes — Cola de docs pendientes\n"
+        "/aprobar <doc\\_id> — Aprobar documento\n"
+        "/rechazar <doc\\_id> [motivo] — Rechazar documento\n\n"
+        "*Comunicación:*\n"
+        "/reply <tid> <msg> — Responder a usuario\n"
+        "/broadcast <msg> — Enviar a todos\n"
+        "/broadcasteligible <msg> — Solo elegibles sin pagar\n"
+        "/broadcastpaid <msg> — Solo usuarios que pagaron\n"
+        "/broadcastcountry <código> <msg> — Por nacionalidad\n\n"
+        "*Analítica:*\n"
+        "/stats — Estadísticas generales\n"
+        "/funnel — Embudo de conversión\n"
+        "/recent [N] — Actividad reciente\n"
+        "/revenue — Ingresos detallados\n"
+        "/countries — Desglose por país\n"
+        "/waitlist — Capacidad y lista de espera\n"
+        "/export — Exportar CSV de usuarios\n\n"
+        "*Operaciones:*\n"
+        "/release [N] — Notificar lista de espera\n"
+        "/reset — Reiniciar cuenta propia"
+    )
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_deleteuser(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Delete a user and ALL their data: /deleteuser <tid> CONFIRM"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    if not ctx.args:
+        await update.message.reply_text("Uso: /deleteuser <telegram\\_id> \\[CONFIRM]", parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        tid = int(ctx.args[0])
+        user = get_user(tid)
+        if not user:
+            await update.message.reply_text(f"Usuario {tid} no encontrado.")
+            return
+
+        if len(ctx.args) < 2 or ctx.args[1].upper() != "CONFIRM":
+            name = user.get('first_name', 'N/A')
+            phase = user.get('current_phase', 1)
+            dc = get_doc_count(tid)
+            await update.message.reply_text(
+                f"⚠️ *¿Eliminar usuario?*\n\n"
+                f"Nombre: {name}\n"
+                f"TID: `{tid}`\n"
+                f"Fase: {phase}\n"
+                f"Documentos: {dc}\n\n"
+                f"Esto borrará TODOS sus datos.\n"
+                f"Confirma con: `/deleteuser {tid} CONFIRM`",
+                parse_mode=ParseMode.MARKDOWN)
+            return
+
+        delete_user(tid)
+        await update.message.reply_text(f"✅ Usuario {tid} eliminado. Todos sus datos han sido borrados.")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_resetuser(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Reset user to welcome screen, keep message history: /resetuser <tid>"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    if not ctx.args:
+        await update.message.reply_text("Uso: /resetuser <telegram\\_id>", parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        tid = int(ctx.args[0])
+        user = get_user(tid)
+        if not user:
+            await update.message.reply_text(f"Usuario {tid} no encontrado.")
+            return
+
+        update_user(tid, eligible=0, current_phase=1, phase2_paid=0, phase3_paid=0,
+            phase4_paid=0, has_criminal_record=0, preliminary_review_sent=0,
+            docs_verified=0, state='new', country_code=None, expediente_ready=0,
+            phase2_answers=None, phase3_answers=None)
+
+        # Delete docs and cases but keep messages
+        conn = get_connection()
+        c = conn.cursor()
+        p = db_param()
+        c.execute(f"SELECT id FROM users WHERE telegram_id = {p}", (tid,))
+        row = c.fetchone()
+        if row:
+            uid = row[0]
+            c.execute(f"DELETE FROM documents WHERE user_id = {p}", (uid,))
+            c.execute(f"DELETE FROM cases WHERE user_id = {p}", (uid,))
+        conn.commit()
+        conn.close()
+
+        try:
+            await ctx.bot.send_message(tid, "Su cuenta ha sido reiniciada. Escriba /start para comenzar.")
+        except Exception:
+            pass
+        await update.message.reply_text(f"✅ Usuario {tid} reiniciado. Documentos eliminados, historial conservado.")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_search(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Search users by name: /search <name>"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    if not ctx.args:
+        await update.message.reply_text("Uso: /search <nombre>")
+        return
+    try:
+        query = " ".join(ctx.args).lower()
+        conn = get_connection()
+        c = conn.cursor()
+        p = db_param()
+        if USE_POSTGRES:
+            c.execute(f"""SELECT telegram_id, first_name, full_name, country_code,
+                eligible, current_phase, phase2_paid, phase3_paid, phase4_paid
+                FROM users WHERE first_name ILIKE {p} OR full_name ILIKE {p}
+                LIMIT 20""", (f"%{query}%", f"%{query}%"))
+        else:
+            c.execute(f"""SELECT telegram_id, first_name, full_name, country_code,
+                eligible, current_phase, phase2_paid, phase3_paid, phase4_paid
+                FROM users WHERE LOWER(first_name) LIKE {p} OR LOWER(COALESCE(full_name,'')) LIKE {p}
+                LIMIT 20""", (f"%{query}%", f"%{query}%"))
+        rows = c.fetchall()
+        conn.close()
+
+        if not rows:
+            await update.message.reply_text("No se encontraron usuarios con ese nombre.")
+            return
+
+        lines = [f"🔍 *Resultados para* \"{query}\":\n"]
+        for row in rows:
+            tid_r, fname, fullname, cc, elig, phase, p2, p3, p4 = row
+            name = fullname or fname or "N/A"
+            country = COUNTRIES.get(cc, {})
+            flag = country.get('flag', '🌍')
+            pay = "P4" if p4 else "P3" if p3 else "P2" if p2 else "Free"
+            lines.append(f"{name} | `{tid_r}` | {flag} | F{phase} | {pay}")
+        lines.append(f"\nUsa /user <tid> para ver perfil completo.")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_users(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Paginated user list: /users [page]"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    try:
+        page = int(ctx.args[0]) if ctx.args else 1
+        per_page = 20
+        offset = (page - 1) * per_page
+
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users")
+        total = c.fetchone()[0]
+        total_pages = max(1, (total + per_page - 1) // per_page)
+
+        c.execute(f"""SELECT telegram_id, first_name, country_code, eligible,
+            current_phase, phase2_paid, created_at
+            FROM users ORDER BY created_at DESC LIMIT {per_page} OFFSET {offset}""")
+        rows = c.fetchall()
+        conn.close()
+
+        if not rows:
+            await update.message.reply_text(f"No hay usuarios en página {page}.")
+            return
+
+        lines = [f"👥 *Usuarios* (pág. {page}/{total_pages}, total: {total})\n"]
+        for i, row in enumerate(rows, start=offset + 1):
+            tid_r, fname, cc, elig, phase, p2, created = row
+            name = fname or "N/A"
+            flag = COUNTRIES.get(cc, {}).get('flag', '🌍') if cc else '🌍'
+            created_str = str(created)[:10] if created else "?"
+            lines.append(f"{i}. {name} (`{tid_r}`) | {flag} | F{phase} | {created_str}")
+
+        if page < total_pages:
+            lines.append(f"\n/users {page + 1} para siguiente")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_pending_payments(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Show users with unconfirmed payments: /pending"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("""SELECT telegram_id, first_name, full_name, state, updated_at
+            FROM users WHERE state IN ('phase2_pending', 'phase3_pending', 'phase4_pending')
+            ORDER BY updated_at ASC""")
+        rows = c.fetchall()
+        conn.close()
+
+        if not rows:
+            await update.message.reply_text("✅ No hay pagos pendientes de confirmar.")
+            return
+
+        lines = ["💳 *Pagos pendientes de aprobación:*\n"]
+        for row in rows:
+            tid_r, fname, fullname, state, updated = row
+            name = fullname or fname or "N/A"
+            time_str = str(updated)[:16] if updated else "?"
+            if state == "phase2_pending":
+                cmd = f"/approve2 {tid_r}"
+            elif state == "phase3_pending":
+                cmd = f"/approve3 {tid_r}"
+            else:
+                cmd = f"/approve4 {tid_r}"
+            lines.append(f"• {name} (`{tid_r}`) — {state}\n  {time_str} → `{cmd}`\n")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_setphase(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Manually set user phase: /setphase <tid> <phase>"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    if len(ctx.args) < 2:
+        await update.message.reply_text("Uso: /setphase <telegram\\_id> <1-4>", parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        tid = int(ctx.args[0])
+        phase = int(ctx.args[1])
+        if phase not in (1, 2, 3, 4):
+            await update.message.reply_text("La fase debe ser 1, 2, 3 o 4.")
+            return
+
+        user = get_user(tid)
+        if not user:
+            await update.message.reply_text(f"Usuario {tid} no encontrado.")
+            return
+
+        if phase == 1:
+            update_user(tid, current_phase=1, phase2_paid=0, phase3_paid=0, phase4_paid=0, state="new")
+        elif phase == 2:
+            update_user(tid, current_phase=2, phase2_paid=1, phase3_paid=0, phase4_paid=0, state="phase2_active")
+        elif phase == 3:
+            update_user(tid, current_phase=3, phase2_paid=1, phase3_paid=1, phase4_paid=0, state="phase3_active")
+        elif phase == 4:
+            update_user(tid, current_phase=4, phase2_paid=1, phase3_paid=1, phase4_paid=1, state="phase4_active")
+
+        await update.message.reply_text(f"✅ Usuario {tid} movido a Fase {phase}.")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_note(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Add internal admin note to user: /note <tid> <text>"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    if len(ctx.args) < 2:
+        await update.message.reply_text("Uso: /note <telegram\\_id> <texto>", parse_mode=ParseMode.MARKDOWN)
+        return
+    try:
+        tid = int(ctx.args[0])
+        note_text = " ".join(ctx.args[1:])
+        save_message(tid, "admin_note", note_text, intent="admin_note")
+        await update.message.reply_text(f"📝 Nota guardada para {tid}: {note_text[:100]}")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_funnel(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Conversion funnel breakdown: /funnel"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users"); total = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE eligible=1"); eligible = c.fetchone()[0]
+        c.execute("SELECT COUNT(DISTINCT u.telegram_id) FROM documents d JOIN users u ON d.user_id=u.id")
+        has_docs = c.fetchone()[0]
+        # Users with 3+ docs
+        c.execute("""SELECT COUNT(*) FROM (
+            SELECT u.telegram_id FROM documents d JOIN users u ON d.user_id=u.id
+            GROUP BY u.telegram_id HAVING COUNT(*) >= 3
+        ) sub""")
+        docs_3plus = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE phase2_paid=1"); p2 = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE phase3_paid=1"); p3 = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE phase4_paid=1"); p4 = c.fetchone()[0]
+        conn.close()
+
+        def pct(n):
+            return f"{n/total*100:.1f}" if total > 0 else "0"
+
+        text = (
+            f"📊 *EMBUDO DE CONVERSIÓN*\n\n"
+            f"Registrados:     {total}  (100%)\n"
+            f"Elegibles:       {eligible}  ({pct(eligible)}%)\n"
+            f"Subieron docs:   {has_docs}  ({pct(has_docs)}%)\n"
+            f"3+ documentos:   {docs_3plus}  ({pct(docs_3plus)}%)\n"
+            f"─────────────────────────\n"
+            f"Fase 2 (€{PRICING['phase2']}):    {p2}  ({pct(p2)}%)\n"
+            f"Fase 3 (€{PRICING['phase3']}):    {p3}  ({pct(p3)}%)\n"
+            f"Fase 4 (€{PRICING['phase4']}):   {p4}  ({pct(p4)}%)"
+        )
+        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_recent(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Activity feed: /recent [N]"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    try:
+        n = min(int(ctx.args[0]), 30) if ctx.args else 10
+        conn = get_connection()
+        c = conn.cursor()
+
+        events = []
+
+        # Recent signups
+        c.execute(f"SELECT telegram_id, first_name, created_at FROM users ORDER BY created_at DESC LIMIT {n}")
+        for row in c.fetchall():
+            events.append(('signup', str(row[2])[:16] if row[2] else '?', row[1] or 'N/A', row[0]))
+
+        # Recent docs
+        c.execute(f"""SELECT d.doc_type, d.uploaded_at, u.first_name, u.telegram_id
+            FROM documents d JOIN users u ON d.user_id=u.id
+            ORDER BY d.uploaded_at DESC LIMIT {n}""")
+        for row in c.fetchall():
+            doc_name = DOC_TYPES.get(row[0], {}).get('name', row[0])
+            events.append(('doc', str(row[1])[:16] if row[1] else '?', row[2] or 'N/A', doc_name))
+
+        # Recent payment state changes
+        c.execute(f"""SELECT telegram_id, first_name, state, updated_at FROM users
+            WHERE state LIKE '%\\_pending' OR state LIKE '%\\_active'
+            ORDER BY updated_at DESC LIMIT {n}""")
+        for row in c.fetchall():
+            events.append(('payment', str(row[3])[:16] if row[3] else '?', row[1] or 'N/A', row[2]))
+
+        conn.close()
+
+        # Sort by timestamp desc
+        events.sort(key=lambda x: x[1], reverse=True)
+        events = events[:n]
+
+        if not events:
+            await update.message.reply_text("No hay actividad reciente.")
+            return
+
+        lines = [f"📋 *Actividad reciente* (últimos {n}):\n"]
+        for ev in events:
+            if ev[0] == 'signup':
+                lines.append(f"🆕 {ev[1]} — {ev[2]} se registró")
+            elif ev[0] == 'doc':
+                lines.append(f"📄 {ev[1]} — {ev[2]} subió {ev[3]}")
+            elif ev[0] == 'payment':
+                lines.append(f"💳 {ev[1]} — {ev[2]} → {ev[3]}")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_countries(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """User breakdown by nationality: /countries"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("""SELECT country_code, COUNT(*) as cnt,
+            SUM(CASE WHEN eligible=1 THEN 1 ELSE 0 END) as elig,
+            SUM(CASE WHEN phase2_paid=1 OR phase3_paid=1 OR phase4_paid=1 THEN 1 ELSE 0 END) as paid
+            FROM users WHERE country_code IS NOT NULL
+            GROUP BY country_code ORDER BY cnt DESC""")
+        rows = c.fetchall()
+        c.execute("SELECT COUNT(*) FROM users")
+        total = c.fetchone()[0]
+        conn.close()
+
+        if not rows:
+            await update.message.reply_text("No hay datos de países.")
+            return
+
+        lines = ["🌍 *Usuarios por país:*\n"]
+        for row in rows:
+            cc, cnt, elig, paid = row
+            country = COUNTRIES.get(cc, {})
+            flag = country.get('flag', '🌍')
+            name = country.get('name', cc)
+            lines.append(f"{flag} {name}: {cnt} ({elig} elegibles, {paid} pagados)")
+        lines.append(f"\n*Total: {total} usuarios*")
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_revenue(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Detailed revenue with projections: /revenue"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    try:
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM users WHERE phase2_paid=1"); p2 = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE phase3_paid=1"); p3 = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM users WHERE phase4_paid=1"); p4 = c.fetchone()[0]
+        conn.close()
+
+        rev_p2 = p2 * PRICING['phase2']
+        rev_p3 = p3 * PRICING['phase3']
+        rev_p4 = p4 * PRICING['phase4']
+        total_rev = rev_p2 + rev_p3 + rev_p4
+
+        # Projections
+        p2_to_p3 = max(0, p2 - p3) * PRICING['phase3']
+        p3_to_p4 = max(0, p3 - p4) * PRICING['phase4']
+        projected = total_rev + p2_to_p3 + p3_to_p4
+        ticket_avg = total_rev / max(p2, 1)
+
+        text = (
+            f"💰 *INGRESOS*\n\n"
+            f"Fase 2 (€{PRICING['phase2']}):    {p2} × €{PRICING['phase2']}  = €{rev_p2}\n"
+            f"Fase 3 (€{PRICING['phase3']}):    {p3} × €{PRICING['phase3']}  = €{rev_p3}\n"
+            f"Fase 4 (€{PRICING['phase4']}):   {p4} × €{PRICING['phase4']} = €{rev_p4}\n"
+            f"─────────────────────────────\n"
+            f"*Total cobrado: €{total_rev}*\n\n"
+            f"*PROYECCIONES*\n"
+            f"Si P2 convierten a P3: +€{p2_to_p3}\n"
+            f"Si P3 convierten a P4: +€{p3_to_p4}\n"
+            f"Potencial total: €{projected}\n\n"
+            f"*POR USUARIO*\n"
+            f"Ticket medio: €{ticket_avg:.0f}\n"
+            f"LTV completo: €{PRICING['total_phases']}"
+        )
+        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_broadcasteligible(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Broadcast to eligible unpaid users: /broadcasteligible <msg>"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    if not ctx.args:
+        await update.message.reply_text("Uso: /broadcasteligible <mensaje>")
+        return
+    try:
+        msg = " ".join(ctx.args)
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT telegram_id FROM users WHERE eligible=1 AND phase2_paid=0")
+        users = [r[0] for r in c.fetchall()]
+        conn.close()
+
+        sent, failed = 0, 0
+        for tid in users:
+            try:
+                await ctx.bot.send_message(tid, msg, parse_mode=ParseMode.MARKDOWN)
+                sent += 1
+            except Exception:
+                failed += 1
+        await update.message.reply_text(f"Enviado: {sent} | Fallido: {failed} (de {len(users)} elegibles sin pagar)")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_broadcastpaid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Broadcast to paying users: /broadcastpaid <msg>"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    if not ctx.args:
+        await update.message.reply_text("Uso: /broadcastpaid <mensaje>")
+        return
+    try:
+        msg = " ".join(ctx.args)
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("SELECT telegram_id FROM users WHERE phase2_paid=1 OR phase3_paid=1 OR phase4_paid=1")
+        users = [r[0] for r in c.fetchall()]
+        conn.close()
+
+        sent, failed = 0, 0
+        for tid in users:
+            try:
+                await ctx.bot.send_message(tid, msg, parse_mode=ParseMode.MARKDOWN)
+                sent += 1
+            except Exception:
+                failed += 1
+        await update.message.reply_text(f"Enviado: {sent} | Fallido: {failed} (de {len(users)} usuarios que pagaron)")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_broadcastcountry(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Broadcast by nationality: /broadcastcountry <code> <msg>"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    if len(ctx.args) < 2:
+        codes = ", ".join(sorted(COUNTRIES.keys()))
+        await update.message.reply_text(f"Uso: /broadcastcountry <código> <mensaje>\n\nCódigos: {codes}")
+        return
+    try:
+        country_code = ctx.args[0].lower()
+        if country_code not in COUNTRIES:
+            codes = ", ".join(sorted(COUNTRIES.keys()))
+            await update.message.reply_text(f"Código no válido. Disponibles: {codes}")
+            return
+
+        msg = " ".join(ctx.args[1:])
+        p = db_param()
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute(f"SELECT telegram_id FROM users WHERE country_code = {p}", (country_code,))
+        users = [r[0] for r in c.fetchall()]
+        conn.close()
+
+        country = COUNTRIES[country_code]
+        sent, failed = 0, 0
+        for tid in users:
+            try:
+                await ctx.bot.send_message(tid, msg, parse_mode=ParseMode.MARKDOWN)
+                sent += 1
+            except Exception:
+                failed += 1
+        await update.message.reply_text(
+            f"Enviado: {sent} | Fallido: {failed} (de {len(users)} usuarios {country['flag']} {country['name']})")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
+async def cmd_export(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Export all users as CSV: /export"""
+    if update.effective_user.id not in ADMIN_IDS: return
+    try:
+        import csv
+        import io
+        from datetime import date as date_type
+
+        conn = get_connection()
+        c = conn.cursor()
+        c.execute("""SELECT telegram_id, first_name, full_name, country_code, eligible,
+            current_phase, phase2_paid, phase3_paid, phase4_paid, state,
+            referral_code, referred_by_code, referral_count, created_at, updated_at
+            FROM users ORDER BY created_at DESC""")
+        rows = c.fetchall()
+        headers = ['telegram_id', 'first_name', 'full_name', 'country_code', 'eligible',
+            'current_phase', 'phase2_paid', 'phase3_paid', 'phase4_paid', 'state',
+            'referral_code', 'referred_by_code', 'referral_count', 'created_at', 'updated_at']
+        conn.close()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(headers)
+        for row in rows:
+            writer.writerow(row)
+
+        csv_bytes = output.getvalue().encode('utf-8')
+        bytes_io = io.BytesIO(csv_bytes)
+        bytes_io.name = f"usuarios_{date_type.today().isoformat()}.csv"
+
+        await ctx.bot.send_document(
+            update.effective_chat.id,
+            document=bytes_io,
+            caption=f"📊 {len(rows)} usuarios exportados")
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+
 async def cmd_user(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """Admin views user profile: /user <telegram_id>"""
     caller_id = update.effective_user.id
@@ -7414,6 +8030,22 @@ def main():
     app.add_handler(CommandHandler("ver", cmd_ver), group=-1)
     app.add_handler(CommandHandler("waitlist", cmd_waitlist), group=-1)
     app.add_handler(CommandHandler("release", cmd_release), group=-1)
+    app.add_handler(CommandHandler("admin", cmd_admin), group=-1)
+    app.add_handler(CommandHandler("deleteuser", cmd_deleteuser), group=-1)
+    app.add_handler(CommandHandler("resetuser", cmd_resetuser), group=-1)
+    app.add_handler(CommandHandler("search", cmd_search), group=-1)
+    app.add_handler(CommandHandler("users", cmd_users), group=-1)
+    app.add_handler(CommandHandler("pending", cmd_pending_payments), group=-1)
+    app.add_handler(CommandHandler("setphase", cmd_setphase), group=-1)
+    app.add_handler(CommandHandler("note", cmd_note), group=-1)
+    app.add_handler(CommandHandler("funnel", cmd_funnel), group=-1)
+    app.add_handler(CommandHandler("recent", cmd_recent), group=-1)
+    app.add_handler(CommandHandler("countries", cmd_countries), group=-1)
+    app.add_handler(CommandHandler("revenue", cmd_revenue), group=-1)
+    app.add_handler(CommandHandler("broadcasteligible", cmd_broadcasteligible), group=-1)
+    app.add_handler(CommandHandler("broadcastpaid", cmd_broadcastpaid), group=-1)
+    app.add_handler(CommandHandler("broadcastcountry", cmd_broadcastcountry), group=-1)
+    app.add_handler(CommandHandler("export", cmd_export), group=-1)
     app.add_handler(CallbackQueryHandler(handle_admin_doc_callback, pattern="^adoc_"), group=-1)
     app.add_handler(CallbackQueryHandler(handle_pending_doc_callback, pattern="^pdoc_"), group=-1)
     app.add_handler(CallbackQueryHandler(handle_rejection_reason_callback, pattern="^prej_"), group=-1)
@@ -7428,7 +8060,7 @@ def main():
         job_queue.run_repeating(send_reminder_1week, interval=timedelta(hours=6), first=timedelta(minutes=15))
         logger.info("Re-engagement reminders scheduled (24h, 72h, 1week)")
 
-    logger.info("PH-Bot v6.0.0 starting")
+    logger.info("PH-Bot v6.2.0 starting")
     logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
     logger.info(f"Payment: FREE > €{PRICING['phase2']} > €{PRICING['phase3']} > €{PRICING['phase4']} | Days left: {days_left()} | BOE: {BOE_PUBLISHED}")
     logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
