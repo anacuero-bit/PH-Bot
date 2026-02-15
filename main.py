@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v6.1.0 — Client Intake & Case Management
+PH-Bot v6.1.1 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
-Updated:    2026-02-14
+Updated:    2026-02-15
 
 CHANGELOG:
 ----------
+v6.1.1 (2026-02-15)
+  - FIX: Remove scammy "race to pay" urgency language
+  - FIX: Remove confusing percentage from document list display
+  - FIX: "Mi checklist" now shows user's actual uploaded documents with status
+  - FIX: Updated welcome message with stronger value proposition
+  - FIX: Audit and fix all broken callback buttons
+  - IMPROVED: Checklist shows approved/pending/missing for each doc type
+
 v6.1.0 (2026-02-14)
   - REFERRAL OVERHAUL: Replace €25 credit system with Cónsul/Embajador tiers
   - NEW: Tier thresholds (Cónsul: 3 friends, Embajador: 10 friends)
@@ -3054,6 +3062,106 @@ def get_country_checklist(country_code: str) -> str:
     )
 
 
+def get_personalized_checklist(tid: int, country_code: str) -> str:
+    """Build personalized checklist showing user's actual document status."""
+    user_docs = get_user_docs(tid)
+
+    # Create lookup: doc_type -> best status (1=approved, 0=pending, -1=rejected)
+    doc_status = {}
+    for doc in user_docs:
+        dtype = doc.get('doc_type')
+        approved = doc.get('approved', 0)
+        # Keep best status if multiple uploads of same type
+        if dtype not in doc_status or approved > doc_status[dtype]:
+            doc_status[dtype] = approved
+
+    # Required docs
+    required = ['passport', 'antecedentes']
+
+    # Proof docs (user needs at least some)
+    proof_types = ['empadronamiento', 'rental', 'utility_bill', 'bank_statement',
+                   'remittance', 'medical', 'transport', 'work_informal', 'education', 'other']
+
+    lines = []
+
+    # SECTION 1: Required docs
+    lines.append("━━━━━━━━━━━━━━━━━━━━")
+    lines.append("📌 OBLIGATORIOS")
+    lines.append("━━━━━━━━━━━━━━━━━━━━\n")
+
+    required_approved = 0
+    for dtype in required:
+        info = DOC_TYPES.get(dtype, {})
+        name = info.get('name', dtype)
+        status = doc_status.get(dtype)
+
+        if status == 1:
+            lines.append(f"✅ {name}")
+            required_approved += 1
+        elif status == 0:
+            lines.append(f"⏳ {name} — en revisión")
+        elif status == -1:
+            lines.append(f"🔄 {name} — sube de nuevo")
+        else:
+            lines.append(f"⬚ {name} — no subido")
+
+    # SECTION 2: Proof of residence docs
+    lines.append("\n━━━━━━━━━━━━━━━━━━━━")
+    lines.append("📍 PRUEBAS DE RESIDENCIA")
+    lines.append("━━━━━━━━━━━━━━━━━━━━\n")
+
+    proof_uploaded = []
+    proof_approved = 0
+
+    for dtype in proof_types:
+        status = doc_status.get(dtype)
+        if status is not None:
+            info = DOC_TYPES.get(dtype, {})
+            name = info.get('name', dtype)
+            if status == 1:
+                proof_uploaded.append(f"✅ {name}")
+                proof_approved += 1
+            elif status == 0:
+                proof_uploaded.append(f"⏳ {name} — en revisión")
+            elif status == -1:
+                proof_uploaded.append(f"🔄 {name} — sube de nuevo")
+
+    if proof_uploaded:
+        for line in proof_uploaded:
+            lines.append(line)
+    else:
+        lines.append("⬚ Ninguna prueba subida todavía")
+        lines.append("")
+        lines.append("_Ejemplos: facturas, banco, médico,_")
+        lines.append("_alquiler, transporte, trabajo..._")
+
+    # SECTION 3: Summary
+    lines.append("\n━━━━━━━━━━━━━━━━━━━━")
+    lines.append("📊 RESUMEN")
+    lines.append("━━━━━━━━━━━━━━━━━━━━\n")
+
+    total_uploaded = len(user_docs)
+    total_approved = sum(1 for d in user_docs if d.get('approved') == 1)
+
+    lines.append(f"Documentos subidos: {total_uploaded}")
+    lines.append(f"Documentos aprobados: {total_approved}")
+
+    # Status message
+    if required_approved < 2:
+        missing = []
+        if doc_status.get('passport') != 1:
+            missing.append("pasaporte")
+        if doc_status.get('antecedentes') != 1:
+            missing.append("antecedentes")
+        lines.append(f"\n⚠️ Falta: {', '.join(missing)}")
+    elif proof_approved == 0:
+        lines.append(f"\n⚠️ Sube al menos 1 prueba de residencia")
+    else:
+        lines.append(f"\n✅ Documentación básica completa")
+
+    return "\n".join(lines)
+
+
 def calculate_progress(user: Dict, dc_approved: int) -> int:
     """Calculate progress percentage — single source of truth for all screens."""
     if user.get("phase4_paid"):
@@ -3755,11 +3863,13 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             apply_referral_code_to_user(tid, result['code'], result['referrer_id'])
 
             await update.message.reply_text(
-                f"🎉 ¡Código aplicado! Tienes *€{PRICING['referral_discount']} de descuento* en tu primer pago.\n\n"
+                f"🎉 ¡Código aplicado! Tienes *€{PRICING['referral_discount']} de descuento* en tu Fase 4.\n\n"
                 "🇪🇸 *¡Bienvenido/a a tuspapeles2026!*\n\n"
-                "Esta plataforma ha sido desarrollada por los abogados de "
-                "*Pombo, Horowitz & Espinosa* para ayudarte con la "
-                "regularización extraordinaria de 2026.\n\n"
+                "Muchos extranjeros perdieron la oportunidad de regularización en 2005 "
+                "por errores en sus solicitudes o por mala asesoría. Por eso, en colaboración "
+                "con abogados de extranjería colegiados y expertos en legaltech e inteligencia "
+                "artificial, hemos diseñado una tecnología enfocada en reducir al máximo la "
+                "probabilidad de error humano durante todas las fases del proceso.\n\n"
                 "Empecemos verificando si cumples los requisitos básicos.\n\n"
                 "Para empezar, indícanos tu país de origen:",
                 parse_mode=ParseMode.MARKDOWN,
@@ -3773,8 +3883,11 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "Sabemos que este momento es importante para ti y tu familia. "
         "La regularización extraordinaria de 2026 es una oportunidad histórica, "
         "y estamos aquí para ayudarte a aprovecharla.\n\n"
-        "Esta plataforma ha sido desarrollada por los abogados de "
-        "*Pombo, Horowitz & Espinosa* para ayudarte con el proceso de regularización.\n\n"
+        "Muchos extranjeros perdieron la oportunidad de regularización en 2005 "
+        "por errores en sus solicitudes o por mala asesoría. Por eso, en colaboración "
+        "con abogados de extranjería colegiados y expertos en legaltech e inteligencia "
+        "artificial, hemos diseñado una tecnología enfocada en reducir al máximo la "
+        "probabilidad de error humano durante todas las fases del proceso:\n\n"
         "✅ Comprobación de elegibilidad\n"
         "✅ Revisión de documentos\n"
         "✅ Evaluación personalizada de tu caso\n"
@@ -3787,7 +3900,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "💡 *Empezar es gratis.* Sin compromiso.\n\n"
         "📅 El plazo cierra el *30 de junio de 2026*.\n\n"
         "Empecemos verificando si cumples los requisitos básicos...\n\n"
-        f"¿Tienes un código de un amigo? Escríbelo para €{PRICING['referral_discount']} de descuento.\n\n"
+        f"¿Tienes un código de un amigo? Escríbelo para €{PRICING['referral_discount']} de descuento en Fase 4.\n\n"
         "Ejemplo: `MARIA-7K2P`",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
@@ -4192,7 +4305,7 @@ async def handle_waitlist(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int
         "el Real Decreto en el BOE (previsto marzo/abril 2026), "
         "abriremos el pago.\n\n"
         "• Notificaremos a todos simultáneamente\n"
-        "• Las primeras 1.000 en pagar aseguran plaza\n\n"
+        "• Capacidad limitada a 1.000 casos para garantizar atención personalizada\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "¿QUÉ PUEDES HACER AHORA?\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -4295,13 +4408,13 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Cuando el BOE publique el Real Decreto "
             "(previsto marzo/abril 2026):\n"
             "• Notificaremos a todos simultáneamente\n"
-            "• Las primeras 1.000 en pagar aseguran plaza\n\n"
+            "• Solo aceptamos 1.000 casos. Cuando se cubran, abriremos lista de espera.\n\n"
             "Mientras tanto, asegúrate de tener todos tus documentos listos."
         )
         keyboard = [
             [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
             [InlineKeyboardButton("Ver mis documentos", callback_data="m_docs")],
-            [InlineKeyboardButton("Volver", callback_data="m_menu")],
+            [InlineKeyboardButton("Volver", callback_data="back")],
         ]
         await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup(keyboard))
@@ -4410,33 +4523,43 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         return ST_MAIN_MENU
 
     if d == "m_checklist":
-        country_code = user.get("country_code", "other")
+        tid = update.effective_user.id
+        country_code = user.get("country_code", "other") if user else "other"
         country = COUNTRIES.get(country_code, COUNTRIES["other"])
-        checklist = get_country_checklist(country_code)
+
+        checklist = get_personalized_checklist(tid, country_code)
 
         await q.edit_message_text(
-            f"📋 *Checklist de documentos para {country['flag']} {country['name']}*\n\n"
+            f"📋 *Tu checklist — {country['flag']} {country['name']}*\n\n"
             f"{checklist}",
             parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
-                [InlineKeyboardButton("Ver 40+ documentos validos", callback_data="proof_docs_full")],
-                [InlineKeyboardButton("Ayuda con antecedentes", callback_data="antecedentes_help")],
-                [InlineKeyboardButton("Volver al menu", callback_data="back")],
+                [InlineKeyboardButton("Subir documento", callback_data="m_upload")],
+                [InlineKeyboardButton("Ver 40+ documentos válidos", callback_data="proof_docs_full")],
+                [InlineKeyboardButton("Menú principal", callback_data="back")],
             ]))
         return ST_MAIN_MENU
 
     if d == "m_docs":
         docs = get_user_docs(update.effective_user.id)
         if not docs:
-            text = "*Sus documentos*\n\nAún no ha subido ningún documento."
+            text = "*Tus documentos*\n\nAún no has subido ningún documento."
         else:
-            text = "*Sus documentos*\n\n"
+            text = "*Tus documentos*\n\n"
             for doc in docs:
                 info = DOC_TYPES.get(doc["doc_type"], DOC_TYPES["other"])
-                icon = "✅" if doc["status"] == "approved" else "⏳"
-                score_text = f" ({doc['validation_score']}%)" if doc["validation_score"] else ""
-                text += f"{icon} {info['icon']} {info['name']}{score_text}\n"
+
+                # Clear status based on approved field
+                approved = doc.get('approved', 0)
+                if approved == 1:
+                    status = "✅ Aprobado"
+                elif approved == -1:
+                    status = "❌ Rechazado — sube de nuevo"
+                else:
+                    status = "⏳ En revisión"
+
+                text += f"{info['icon']} {info['name']} — {status}\n"
+
         await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Subir documento", callback_data="m_upload")],
@@ -4628,7 +4751,7 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
             kb = InlineKeyboardMarkup([
                 [InlineKeyboardButton("Continuar gratis", callback_data="paid2_free")],
-                [InlineKeyboardButton("Volver", callback_data="m_menu")],
+                [InlineKeyboardButton("Volver", callback_data="back")],
             ])
         else:
             lines.append(f"Ha subido {dc} documentos. Con este pago:\n")
@@ -5264,7 +5387,10 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Puede volver a escribirnos en cualquier momento.")
         return ConversationHandler.END
 
-    return ST_MAIN_MENU
+    # Fallback for unhandled callbacks
+    logger.warning(f"Unhandled callback_data: {d}")
+    await q.answer("Opción no reconocida. Volviendo al menú.")
+    return await show_main_menu(update, ctx)
 
 
 # --- Phase 2 Questionnaire ---
@@ -6944,7 +7070,7 @@ async def cmd_documentos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
             "Use el menú para subir sus documentos.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Subir documentos", callback_data="m_docs")],
-                [InlineKeyboardButton("Menu", callback_data="m_menu")],
+                [InlineKeyboardButton("Menu", callback_data="back")],
             ]),
         )
         return ST_MAIN_MENU
@@ -6966,7 +7092,7 @@ async def cmd_documentos(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("Subir mas documentos", callback_data="m_docs")],
-            [InlineKeyboardButton("Menu", callback_data="m_menu")],
+            [InlineKeyboardButton("Menu", callback_data="back")],
         ]),
     )
     return ST_MAIN_MENU
@@ -7009,7 +7135,7 @@ async def cmd_contacto(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         "Escribe tu mensaje aquí y lo trasladaremos a un abogado:",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Menu", callback_data="m_menu")],
+            [InlineKeyboardButton("Menu", callback_data="back")],
         ]),
     )
     ctx.user_data["awaiting_human_msg"] = True
