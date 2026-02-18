@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v6.3.0 — Client Intake & Case Management
+PH-Bot v6.4.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
 Updated:    2026-02-18
 
 CHANGELOG:
 ----------
+v6.4.0 (2026-02-18)
+  - NEW: Post-eligibility data collection flow (WhatsApp, email, community invites)
+  - NEW: 15-question demographics questionnaire (optional, button-based)
+  - NEW: Separate marketing consent and research consent (GDPR/LSSI compliant)
+  - NEW: /privacidad command — users can view data, withdraw consent, request deletion
+  - NEW: Demographics data stored as JSON blob in users table
+  - NEW: Community group + channel invitation prompts
+  - NEW: ST_COLLECT_WHATSAPP, ST_COLLECT_EMAIL, ST_COMMUNITY_INVITE states
+  - NEW: ST_DEMO_INTRO through ST_DEMO_MARKETING_CONSENT states (demographics flow)
+  - NEW: /demographics admin command — aggregate stats on collected data
+
 v6.3.0 (2026-02-18)
   - NEW: Institutional partner system (B2B referrals)
   - NEW: /addpartner <name> <location> — create business partner with INST code
@@ -449,7 +460,25 @@ STRIPE_LINKS = {
     ST_PHASE3_QUESTIONNAIRE,
     ST_PHASE3_TEXT_ANSWER,
     ST_WAITLIST,
-) = range(27)
+    ST_COLLECT_WHATSAPP,
+    ST_COLLECT_EMAIL,
+    ST_COMMUNITY_INVITE,
+    ST_DEMO_INTRO,
+    ST_DEMO_AGE,
+    ST_DEMO_GENDER,
+    ST_DEMO_CITY,
+    ST_DEMO_POSTAL,
+    ST_DEMO_OCCUPATION,
+    ST_DEMO_INCOME,
+    ST_DEMO_REMIT_FREQ,
+    ST_DEMO_REMIT_AMT,
+    ST_DEMO_REMIT_PROVIDER,
+    ST_DEMO_CHALLENGES,
+    ST_DEMO_INTERESTS,
+    ST_DEMO_SOURCE,
+    ST_DEMO_RESEARCH_CONSENT,
+    ST_DEMO_MARKETING_CONSENT,
+) = range(45)
 
 # =============================================================================
 # REFERRAL SYSTEM — Cónsul/Embajador Tiers
@@ -483,6 +512,28 @@ TIER_BENEFITS = {
 INST_PAYOUT_FULL_PHASES = 20    # €20 when referred client pays full €247 (all phases)
 INST_PAYOUT_PREPAY = 15         # €15 when referred client pays €199 (prepay)
 INST_PAYOUT_MINIMUM = 30        # Minimum €30 accumulated to trigger payout
+
+# =============================================================================
+# COMMUNITY & DATA COLLECTION
+# =============================================================================
+
+# Community links
+TELEGRAM_CHANNEL = "https://t.me/tuspapeles2026"
+TELEGRAM_GROUP = "https://t.me/+XXXXXXXXXX"  # Replace with actual invite link
+WHATSAPP_NUMBER = "+34XXXXXXXXX"  # Replace with actual WhatsApp Business number
+
+# Demographics questionnaire options
+DEMO_AGE_OPTIONS = ["18-24", "25-34", "35-44", "45-54", "55+"]
+DEMO_GENDER_OPTIONS = ["Hombre", "Mujer", "Prefiero no decir"]
+DEMO_CITY_OPTIONS = ["Madrid", "Barcelona", "Valencia", "Sevilla", "Málaga", "Otra"]
+DEMO_OCCUPATION_OPTIONS = ["Limpieza", "Construcción", "Hostelería", "Reparto", "Comercio", "Cuidados", "Desempleado/a", "Otro"]
+DEMO_INCOME_OPTIONS = ["Menos de €600", "€600-1.000", "€1.000-1.500", "Más de €1.500", "Prefiero no decir"]
+DEMO_REMIT_FREQ_OPTIONS = ["Sí, cada mes", "Sí, a veces", "No"]
+DEMO_REMIT_AMT_OPTIONS = ["Menos de €100", "€100-300", "€300-500", "Más de €500", "No aplica"]
+DEMO_REMIT_PROVIDER_OPTIONS = ["Western Union", "Ria", "Small World", "Bizum", "Wise/Revolut", "Otro", "No envío"]
+DEMO_CHALLENGES = ["Trabajo estable", "Vivienda", "Idioma", "Salud", "Soledad", "Educación hijos", "Ninguna"]
+DEMO_INTERESTS = ["Ofertas empleo", "Envíos más baratos", "Móvil económico", "Clases español", "Asesoría legal", "Seguros", "Cuenta bancaria", "Ninguno"]
+DEMO_SOURCE_OPTIONS = ["Amigo/familiar", "WhatsApp", "Facebook", "TikTok/Instagram", "Iglesia/comunidad", "Tienda/locutorio", "Google", "Otro"]
 
 # =============================================================================
 # COUNTRY DATA (no slang greetings — professional tone)
@@ -1958,6 +2009,28 @@ def init_db():
         conn.commit()
     except Exception:
         conn.rollback()
+
+    # v6.4.0: Data collection columns
+    data_collection_columns = [
+        ("email", "VARCHAR(255)"),
+        ("whatsapp_phone", "VARCHAR(20)"),
+        ("marketing_consent", "INTEGER DEFAULT 0"),
+        ("marketing_consent_date", "TIMESTAMP"),
+        ("research_consent", "INTEGER DEFAULT 0"),
+        ("research_consent_date", "TIMESTAMP"),
+        ("joined_community_group", "INTEGER DEFAULT 0"),
+        ("joined_channel", "INTEGER DEFAULT 0"),
+        ("demographics_completed", "INTEGER DEFAULT 0"),
+        ("demographics_skipped", "INTEGER DEFAULT 0"),
+        ("demographics_data", "TEXT"),
+        ("discovery_source", "VARCHAR(30)"),
+    ]
+    for col_name, col_type in data_collection_columns:
+        try:
+            c.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}")
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
     conn.commit()
     conn.close()
@@ -4529,20 +4602,558 @@ async def handle_q3(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
     counter = get_waitlist_count()
     await q.edit_message_text(
+        f"*{name}, cumples los requisitos.* 🎉\n\n"
+        f"Expediente: *{case['case_number']}*\n"
+        f"Plazo: 1 abril — 30 junio 2026 ({days_left()} días)\n\n"
+        f"{counter:,} personas en lista de espera.\n\n"
+        "Para mantenerte informado de los próximos pasos, "
+        "¿quieres recibir avisos por WhatsApp?\n\n"
+        "Solo lo importante: fechas, novedades, y servicios útiles.\n"
+        "Máximo 1 mensaje por semana.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Sí, mi WhatsApp es el mismo", callback_data="wa_same")],
+            [InlineKeyboardButton("Sí, otro número", callback_data="wa_other")],
+            [InlineKeyboardButton("No, gracias", callback_data="wa_skip")],
+        ]),
+    )
+    return ST_COLLECT_WHATSAPP
+
+
+# =============================================================================
+# DATA COLLECTION FLOW (post-eligibility)
+# =============================================================================
+
+async def show_eligible_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show the standard post-eligibility menu with upload/waitlist/FAQ options."""
+    tid = update.effective_user.id
+    user = get_user(tid)
+    case = get_or_create_case(tid)
+    counter = get_waitlist_count()
+    name = user.get('full_name') or user.get('first_name', '')
+
+    text = (
         f"*{name}, cumples los requisitos.*\n\n"
         f"Expediente: *{case['case_number']}*\n"
         f"Plazo: 1 abril — 30 junio 2026 ({days_left()} días)\n\n"
         f"{counter:,} personas en lista de espera.\n\n"
-        "*Siguiente paso:* sube tus documentos para tenerlos listos cuando abra el proceso.\n\n"
-        "Subir documentos es gratuito.",
+        "*Siguiente paso:* sube tus documentos para tenerlos listos "
+        "cuando abra el proceso.\n\n"
+        "Subir documentos es gratuito."
+    )
+    keyboard = [
+        [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
+        [InlineKeyboardButton("Ver lista de espera", callback_data="waitlist")],
+        [InlineKeyboardButton("Preguntas frecuentes", callback_data="m_faq")],
+    ]
+
+    msg = update.callback_query.message if update.callback_query else update.effective_message
+    await msg.reply_text(text, parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(keyboard))
+    return ST_ELIGIBLE
+
+
+async def handle_collect_whatsapp(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Collect WhatsApp number after eligibility."""
+    q = update.callback_query
+    if q:
+        await q.answer()
+        d = q.data
+        tid = update.effective_user.id
+
+        if d == "wa_same":
+            # Try to get phone from Telegram contact (may not be available)
+            user = get_user(tid)
+            phone = user.get('phone')
+            if phone:
+                update_user(tid, whatsapp_phone=phone)
+                await q.edit_message_text(
+                    f"Perfecto, te avisaremos al {phone}.\n\n"
+                    "¿Y por email? Te enviamos un resumen mensual "
+                    "con lo más importante.",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton("Sí, escribir mi email", callback_data="email_enter")],
+                        [InlineKeyboardButton("No, gracias", callback_data="email_skip")],
+                    ]),
+                )
+            else:
+                await q.edit_message_text(
+                    "No tenemos tu número de Telegram. "
+                    "Escríbelo aquí (con prefijo, ej: +34612345678):",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                ctx.user_data['awaiting_wa_number'] = True
+                return ST_COLLECT_WHATSAPP
+            return ST_COLLECT_EMAIL
+
+        elif d == "wa_other":
+            await q.edit_message_text(
+                "Escribe tu número de WhatsApp (con prefijo, ej: +34612345678):",
+            )
+            ctx.user_data['awaiting_wa_number'] = True
+            return ST_COLLECT_WHATSAPP
+
+        elif d == "wa_skip":
+            await q.edit_message_text(
+                "Sin problema.\n\n"
+                "¿Quieres recibir un resumen mensual por email?",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Sí, escribir mi email", callback_data="email_enter")],
+                    [InlineKeyboardButton("No, gracias", callback_data="email_skip")],
+                ]),
+            )
+            return ST_COLLECT_EMAIL
+
+    # Text input — user typing their WhatsApp number
+    if update.message and update.message.text:
+        phone = update.message.text.strip()
+        # Basic validation: starts with + and has 9-15 digits
+        digits_only = ''.join(c for c in phone if c.isdigit())
+        if len(digits_only) >= 9 and len(digits_only) <= 15:
+            tid = update.effective_user.id
+            if not phone.startswith('+'):
+                phone = '+' + phone
+            update_user(tid, whatsapp_phone=phone)
+            await update.message.reply_text(
+                f"Guardado: {phone}\n\n"
+                "¿Y por email? Te enviamos un resumen mensual.",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("Sí, escribir mi email", callback_data="email_enter")],
+                    [InlineKeyboardButton("No, gracias", callback_data="email_skip")],
+                ]),
+            )
+            return ST_COLLECT_EMAIL
+        else:
+            await update.message.reply_text(
+                "Número no válido. Escríbelo con prefijo (ej: +34612345678):",
+            )
+            return ST_COLLECT_WHATSAPP
+
+    return ST_COLLECT_WHATSAPP
+
+
+async def handle_collect_email(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Collect email after WhatsApp."""
+    q = update.callback_query
+    if q:
+        await q.answer()
+        d = q.data
+        tid = update.effective_user.id
+
+        if d == "email_enter":
+            await q.edit_message_text("Escribe tu email:")
+            ctx.user_data['awaiting_email'] = True
+            return ST_COLLECT_EMAIL
+
+        elif d == "email_skip":
+            return await show_community_invite(update, ctx, edit=True)
+
+    # Text input — user typing their email
+    if update.message and update.message.text:
+        email = update.message.text.strip().lower()
+        if '@' in email and '.' in email.split('@')[-1]:
+            tid = update.effective_user.id
+            update_user(tid, email=email)
+            await update.message.reply_text(f"Guardado: {email}")
+            return await show_community_invite(update, ctx, edit=False)
+        else:
+            await update.message.reply_text("Email no válido. Inténtalo de nuevo:")
+            return ST_COLLECT_EMAIL
+
+    return ST_COLLECT_EMAIL
+
+
+async def show_community_invite(update: Update, ctx: ContextTypes.DEFAULT_TYPE, edit=True) -> int:
+    """Show community group and channel invitations."""
+    text = (
+        "*Únete a nuestra comunidad*\n\n"
+        "Miles de personas preparándose juntas.\n"
+        "Comparten dudas, experiencias y se apoyan.\n\n"
+        f"Canal de noticias: {TELEGRAM_CHANNEL}\n"
+        "   Noticias y fechas importantes\n\n"
+        f"Grupo de comunidad: {TELEGRAM_GROUP}\n"
+        "   Pregunta y habla con otros\n\n"
+        f"Guarda nuestro WhatsApp: {WHATSAPP_NUMBER}\n"
+        "   Para recibir avisos directos"
+    )
+    keyboard = [
+        [InlineKeyboardButton("Ya me uní", callback_data="community_joined")],
+        [InlineKeyboardButton("Lo haré después", callback_data="community_skip")],
+    ]
+
+    if edit and update.callback_query:
+        await update.callback_query.edit_message_text(
+            text, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            disable_web_page_preview=True,
+        )
+    else:
+        msg = update.effective_message or update.callback_query.message
+        await msg.reply_text(
+            text, parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            disable_web_page_preview=True,
+        )
+    return ST_COMMUNITY_INVITE
+
+
+async def handle_community_invite(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle community invite response, then offer demographics."""
+    q = update.callback_query
+    await q.answer()
+    tid = update.effective_user.id
+
+    if q.data == "community_joined":
+        update_user(tid, joined_community_group=1, joined_channel=1)
+
+    # Now offer demographics questionnaire
+    await q.edit_message_text(
+        "*¿Nos ayudas con unas preguntas rápidas?*\n\n"
+        "Son 2-3 minutos. Nos sirve para:\n"
+        "• Mejorar el servicio\n"
+        "• Entender las necesidades de tu comunidad\n"
+        "• Conectarte con servicios útiles\n\n"
+        "Tus respuestas son *anónimas*. Nunca se comparten "
+        "con el gobierno ni con inmigración.",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Subir documentos", callback_data="m_upload")],
-            [InlineKeyboardButton("Ver lista de espera", callback_data="waitlist")],
-            [InlineKeyboardButton("Preguntas frecuentes", callback_data="m_faq")],
+            [InlineKeyboardButton("Sí, respondo ahora (2 min)", callback_data="demo_start")],
+            [InlineKeyboardButton("Ahora no", callback_data="demo_skip")],
         ]),
     )
-    return ST_ELIGIBLE
+    return ST_DEMO_INTRO
+
+
+# =============================================================================
+# DEMOGRAPHICS QUESTIONNAIRE FLOW
+# =============================================================================
+
+async def handle_demo_intro(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Start or skip demographics questionnaire."""
+    q = update.callback_query
+    await q.answer()
+    tid = update.effective_user.id
+
+    if q.data == "demo_skip":
+        update_user(tid, demographics_skipped=1)
+        return await show_eligible_menu(update, ctx)
+
+    # demo_start — begin questionnaire
+    ctx.user_data['demo'] = {}
+    await q.edit_message_text(
+        "Pregunta 1 de 12\n\n*¿Cuántos años tienes?*",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(opt, callback_data=f"dq_age_{opt}")]
+            for opt in DEMO_AGE_OPTIONS
+        ]),
+    )
+    return ST_DEMO_AGE
+
+
+async def handle_demo_age(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+    ctx.user_data['demo']['age'] = q.data.replace("dq_age_", "")
+    await q.edit_message_text(
+        "Pregunta 2 de 12\n\n*Género*",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(opt, callback_data=f"dq_gen_{opt}")]
+            for opt in DEMO_GENDER_OPTIONS
+        ]),
+    )
+    return ST_DEMO_GENDER
+
+
+async def handle_demo_gender(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+    ctx.user_data['demo']['gender'] = q.data.replace("dq_gen_", "")
+    await q.edit_message_text(
+        "Pregunta 3 de 12\n\n*¿En qué ciudad vives?*",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(opt, callback_data=f"dq_city_{opt}")]
+            for opt in DEMO_CITY_OPTIONS
+        ]),
+    )
+    return ST_DEMO_CITY
+
+
+async def handle_demo_city(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+    ctx.user_data['demo']['city'] = q.data.replace("dq_city_", "")
+    await q.edit_message_text(
+        "Pregunta 4 de 12\n\n*¿En qué trabajas actualmente?*",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(opt, callback_data=f"dq_occ_{i}")]
+            for i, opt in enumerate(DEMO_OCCUPATION_OPTIONS)
+        ]),
+    )
+    return ST_DEMO_OCCUPATION
+
+
+async def handle_demo_occupation(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+    idx = int(q.data.replace("dq_occ_", ""))
+    ctx.user_data['demo']['occupation'] = DEMO_OCCUPATION_OPTIONS[idx]
+    await q.edit_message_text(
+        "Pregunta 5 de 12\n\n*¿Cuánto ganas al mes aproximadamente?*",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(opt, callback_data=f"dq_inc_{i}")]
+            for i, opt in enumerate(DEMO_INCOME_OPTIONS)
+        ]),
+    )
+    return ST_DEMO_INCOME
+
+
+async def handle_demo_income(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+    idx = int(q.data.replace("dq_inc_", ""))
+    ctx.user_data['demo']['income'] = DEMO_INCOME_OPTIONS[idx]
+    await q.edit_message_text(
+        "Pregunta 6 de 12\n\n*¿Envías dinero a tu país?*",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(opt, callback_data=f"dq_rf_{i}")]
+            for i, opt in enumerate(DEMO_REMIT_FREQ_OPTIONS)
+        ]),
+    )
+    return ST_DEMO_REMIT_FREQ
+
+
+async def handle_demo_remit_freq(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+    idx = int(q.data.replace("dq_rf_", ""))
+    ctx.user_data['demo']['remit_freq'] = DEMO_REMIT_FREQ_OPTIONS[idx]
+
+    if ctx.user_data['demo']['remit_freq'] == "No":
+        ctx.user_data['demo']['remit_amount'] = "No aplica"
+        ctx.user_data['demo']['remit_provider'] = "No envío"
+        # Skip to Q9 (challenges)
+        return await show_demo_challenges(update, ctx)
+
+    await q.edit_message_text(
+        "Pregunta 7 de 12\n\n*¿Cuánto envías al mes?*",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton(opt, callback_data=f"dq_ra_{i}")]
+            for i, opt in enumerate(DEMO_REMIT_AMT_OPTIONS)
+        ]),
+    )
+    return ST_DEMO_REMIT_AMT
+
+
+async def handle_demo_remit_amt(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+    idx = int(q.data.replace("dq_ra_", ""))
+    ctx.user_data['demo']['remit_amount'] = DEMO_REMIT_AMT_OPTIONS[idx]
+    # Show remittance provider with 2-column layout
+    buttons = []
+    row = []
+    for i, opt in enumerate(DEMO_REMIT_PROVIDER_OPTIONS):
+        row.append(InlineKeyboardButton(opt, callback_data=f"dq_rp_{i}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+
+    await q.edit_message_text(
+        "Pregunta 8 de 12\n\n*¿Con qué servicio envías dinero?*",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
+    return ST_DEMO_REMIT_PROVIDER
+
+
+async def handle_demo_remit_provider(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+    idx = int(q.data.replace("dq_rp_", ""))
+    ctx.user_data['demo']['remit_provider'] = DEMO_REMIT_PROVIDER_OPTIONS[idx]
+    return await show_demo_challenges(update, ctx)
+
+
+async def show_demo_challenges(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Multi-select: biggest challenges. Use toggle pattern."""
+    q = update.callback_query
+    if 'demo_challenges' not in ctx.user_data:
+        ctx.user_data['demo_challenges'] = set()
+
+    selected = ctx.user_data['demo_challenges']
+    buttons = []
+    for i, opt in enumerate(DEMO_CHALLENGES):
+        check = "✅ " if opt in selected else ""
+        buttons.append([InlineKeyboardButton(f"{check}{opt}", callback_data=f"dq_ch_{i}")])
+    buttons.append([InlineKeyboardButton("Continuar →", callback_data="dq_ch_done")])
+
+    text = "Pregunta 9 de 12\n\n*¿Cuál es tu mayor dificultad ahora mismo?*\n(Puedes elegir varias)"
+    await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(buttons))
+    return ST_DEMO_CHALLENGES
+
+
+async def handle_demo_challenges(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+    d = q.data
+
+    if d == "dq_ch_done":
+        ctx.user_data['demo']['challenges'] = list(ctx.user_data.get('demo_challenges', []))
+        return await show_demo_interests(update, ctx)
+
+    idx = int(d.replace("dq_ch_", ""))
+    opt = DEMO_CHALLENGES[idx]
+    if 'demo_challenges' not in ctx.user_data:
+        ctx.user_data['demo_challenges'] = set()
+    if opt in ctx.user_data['demo_challenges']:
+        ctx.user_data['demo_challenges'].discard(opt)
+    else:
+        ctx.user_data['demo_challenges'].add(opt)
+
+    return await show_demo_challenges(update, ctx)
+
+
+async def show_demo_interests(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Multi-select: service interests."""
+    q = update.callback_query
+    if 'demo_interests' not in ctx.user_data:
+        ctx.user_data['demo_interests'] = set()
+
+    selected = ctx.user_data['demo_interests']
+    buttons = []
+    for i, opt in enumerate(DEMO_INTERESTS):
+        check = "✅ " if opt in selected else ""
+        buttons.append([InlineKeyboardButton(f"{check}{opt}", callback_data=f"dq_int_{i}")])
+    buttons.append([InlineKeyboardButton("Continuar →", callback_data="dq_int_done")])
+
+    text = "Pregunta 10 de 12\n\n*¿Qué servicios te interesarían?*\n(Puedes elegir varios)"
+    await q.edit_message_text(text, parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(buttons))
+    return ST_DEMO_INTERESTS
+
+
+async def handle_demo_interests(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+    d = q.data
+
+    if d == "dq_int_done":
+        ctx.user_data['demo']['interests'] = list(ctx.user_data.get('demo_interests', []))
+        # Show source question
+        await q.edit_message_text(
+            "Pregunta 11 de 12\n\n*¿Cómo supiste de tuspapeles2026?*",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(opt, callback_data=f"dq_src_{i}")]
+                for i, opt in enumerate(DEMO_SOURCE_OPTIONS)
+            ]),
+        )
+        return ST_DEMO_SOURCE
+
+    idx = int(d.replace("dq_int_", ""))
+    opt = DEMO_INTERESTS[idx]
+    if 'demo_interests' not in ctx.user_data:
+        ctx.user_data['demo_interests'] = set()
+    if opt in ctx.user_data['demo_interests']:
+        ctx.user_data['demo_interests'].discard(opt)
+    else:
+        ctx.user_data['demo_interests'].add(opt)
+
+    return await show_demo_interests(update, ctx)
+
+
+async def handle_demo_source(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+    idx = int(q.data.replace("dq_src_", ""))
+    ctx.user_data['demo']['source'] = DEMO_SOURCE_OPTIONS[idx]
+
+    # Research consent
+    await q.edit_message_text(
+        "Pregunta 12 de 12\n\n"
+        "*¿Aceptas que usemos tus respuestas de forma "
+        "anónima y agregada para mejorar el servicio "
+        "y crear informes de mercado?*\n\n"
+        "Tus datos *nunca* se comparten con el gobierno, "
+        "policía ni oficinas de inmigración.\n"
+        "Solo se usan de forma anónima.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Sí, acepto", callback_data="dq_rc_yes")],
+            [InlineKeyboardButton("No, prefiero no", callback_data="dq_rc_no")],
+        ]),
+    )
+    return ST_DEMO_RESEARCH_CONSENT
+
+
+async def handle_demo_research_consent(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    q = update.callback_query
+    await q.answer()
+
+    research_consent = 1 if q.data == "dq_rc_yes" else 0
+    ctx.user_data['demo']['research_consent'] = research_consent
+
+    # Marketing consent
+    await q.edit_message_text(
+        "*Última pregunta:*\n\n"
+        "¿Quieres recibir información sobre servicios "
+        "que podrían interesarte?\n\n"
+        "Empleo, envíos de dinero, móvil, banca, etc.\n"
+        "Puedes darte de baja cuando quieras.",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Sí, me interesa", callback_data="dq_mc_yes")],
+            [InlineKeyboardButton("No, gracias", callback_data="dq_mc_no")],
+        ]),
+    )
+    return ST_DEMO_MARKETING_CONSENT
+
+
+async def handle_demo_marketing_consent(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
+    """Final question. Save everything and show eligible menu."""
+    q = update.callback_query
+    await q.answer()
+    tid = update.effective_user.id
+
+    marketing_consent = 1 if q.data == "dq_mc_yes" else 0
+
+    now = datetime.utcnow().isoformat()
+
+    demo_data = ctx.user_data.get('demo', {})
+    research_consent = demo_data.pop('research_consent', 0)
+
+    # Save everything
+    update_user(
+        tid,
+        demographics_completed=1,
+        demographics_data=json.dumps(demo_data, ensure_ascii=False),
+        discovery_source=demo_data.get('source', ''),
+        research_consent=research_consent,
+        research_consent_date=now if research_consent else None,
+        marketing_consent=marketing_consent,
+        marketing_consent_date=now if marketing_consent else None,
+    )
+
+    # Clean up user_data
+    ctx.user_data.pop('demo', None)
+    ctx.user_data.pop('demo_challenges', None)
+    ctx.user_data.pop('demo_interests', None)
+
+    await q.edit_message_text("¡Gracias por tu ayuda!")
+
+    # Show the standard eligible menu
+    return await show_eligible_menu(update, ctx)
 
 
 # --- Waitlist wall ---
@@ -6527,6 +7138,8 @@ async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/addpartner <name> <location> [phone] — Crear partner B2B\n"
         "/partners — Ver todos los partners y stats\n"
         "/partnercard <code> — Regenerar tarjeta de partner\n\n"
+        "*Datos:*\n"
+        "/demographics — Ver datos recopilados y estadísticas\n\n"
         "*Operaciones:*\n"
         "/release [N] — Notificar lista de espera\n"
         "/reset — Reiniciar cuenta propia"
@@ -7303,6 +7916,116 @@ async def cmd_partnercard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         with open(card_path, 'rb') as f:
             await update.message.reply_photo(photo=f, caption=f"Tarjeta para {row[0]}")
         os.remove(card_path)
+
+
+# =============================================================================
+# PRIVACY & DATA MANAGEMENT
+# =============================================================================
+
+async def cmd_privacidad(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Let users manage their data and consent."""
+    tid = update.effective_user.id
+    user = get_user(tid)
+
+    if not user:
+        await update.message.reply_text("No tienes cuenta activa. Escribe /start para comenzar.")
+        return
+
+    email = user.get('email') or 'No proporcionado'
+    wa = user.get('whatsapp_phone') or 'No proporcionado'
+    mktg = "Sí" if user.get('marketing_consent') else "No"
+    research = "Sí" if user.get('research_consent') else "No"
+    demo = "Completado" if user.get('demographics_completed') else "No completado"
+
+    text = (
+        "*Tu privacidad*\n\n"
+        f"Email: {email}\n"
+        f"WhatsApp: {wa}\n"
+        f"Consentimiento marketing: {mktg}\n"
+        f"Consentimiento investigación: {research}\n"
+        f"Cuestionario: {demo}\n\n"
+        "¿Qué quieres hacer?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("Retirar consentimiento marketing", callback_data="priv_no_marketing")],
+        [InlineKeyboardButton("Retirar consentimiento investigación", callback_data="priv_no_research")],
+        [InlineKeyboardButton("Borrar mis datos del cuestionario", callback_data="priv_delete_demo")],
+        [InlineKeyboardButton("Cerrar", callback_data="priv_close")],
+    ]
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN,
+        reply_markup=InlineKeyboardMarkup(keyboard))
+
+
+async def handle_privacidad_callback(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Handle privacy management callbacks."""
+    q = update.callback_query
+    await q.answer()
+    tid = update.effective_user.id
+
+    if q.data == "priv_no_marketing":
+        update_user(tid, marketing_consent=0)
+        await q.edit_message_text("Marketing desactivado. Ya no recibirás ofertas comerciales.")
+
+    elif q.data == "priv_no_research":
+        update_user(tid, research_consent=0)
+        await q.edit_message_text("Investigación desactivada. Tus datos no se usarán en informes.")
+
+    elif q.data == "priv_delete_demo":
+        update_user(tid, demographics_data=None, demographics_completed=0, discovery_source=None)
+        await q.edit_message_text("Datos del cuestionario eliminados.")
+
+    elif q.data == "priv_close":
+        await q.edit_message_text("Puedes escribir /privacidad en cualquier momento.")
+
+
+# =============================================================================
+# DEMOGRAPHICS ADMIN COMMAND
+# =============================================================================
+
+async def cmd_demographics(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Show aggregate demographics stats. Admin only."""
+    if update.effective_user.id not in ADMIN_IDS:
+        return
+
+    conn = get_connection()
+    c = conn.cursor()
+
+    # Total counts
+    c.execute("SELECT COUNT(*) FROM users WHERE demographics_completed = 1")
+    completed = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE demographics_skipped = 1")
+    skipped = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE marketing_consent = 1")
+    mktg = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE research_consent = 1")
+    research = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE email IS NOT NULL AND email != ''")
+    emails = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE whatsapp_phone IS NOT NULL AND whatsapp_phone != ''")
+    phones = c.fetchone()[0]
+    c.execute("SELECT COUNT(*) FROM users WHERE joined_community_group = 1")
+    group_joined = c.fetchone()[0]
+
+    # Discovery source breakdown
+    c.execute("SELECT discovery_source, COUNT(*) FROM users WHERE discovery_source IS NOT NULL AND discovery_source != '' GROUP BY discovery_source ORDER BY COUNT(*) DESC")
+    sources = c.fetchall()
+    conn.close()
+
+    source_text = "\n".join([f"  {s[0]}: {s[1]}" for s in sources]) if sources else "  Sin datos"
+
+    text = (
+        "*DATOS RECOPILADOS*\n\n"
+        f"Cuestionarios completados: {completed}\n"
+        f"Cuestionarios saltados: {skipped}\n\n"
+        f"Emails recogidos: {emails}\n"
+        f"WhatsApp recogidos: {phones}\n"
+        f"Unieron al grupo: {group_joined}\n\n"
+        f"Consentimiento marketing: {mktg}\n"
+        f"Consentimiento investigación: {research}\n\n"
+        "*¿Cómo nos encontraron?*\n"
+        f"{source_text}"
+    )
+    await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 
 async def cmd_user(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -8465,6 +9188,59 @@ def main():
                 MessageHandler(filters.Document.ALL, handle_file_upload),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text),
             ],
+            ST_COLLECT_WHATSAPP: [
+                CallbackQueryHandler(handle_collect_whatsapp),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_collect_whatsapp),
+            ],
+            ST_COLLECT_EMAIL: [
+                CallbackQueryHandler(handle_collect_email),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_collect_email),
+            ],
+            ST_COMMUNITY_INVITE: [
+                CallbackQueryHandler(handle_community_invite),
+            ],
+            ST_DEMO_INTRO: [
+                CallbackQueryHandler(handle_demo_intro),
+            ],
+            ST_DEMO_AGE: [
+                CallbackQueryHandler(handle_demo_age),
+            ],
+            ST_DEMO_GENDER: [
+                CallbackQueryHandler(handle_demo_gender),
+            ],
+            ST_DEMO_CITY: [
+                CallbackQueryHandler(handle_demo_city),
+            ],
+            ST_DEMO_OCCUPATION: [
+                CallbackQueryHandler(handle_demo_occupation),
+            ],
+            ST_DEMO_INCOME: [
+                CallbackQueryHandler(handle_demo_income),
+            ],
+            ST_DEMO_REMIT_FREQ: [
+                CallbackQueryHandler(handle_demo_remit_freq),
+            ],
+            ST_DEMO_REMIT_AMT: [
+                CallbackQueryHandler(handle_demo_remit_amt),
+            ],
+            ST_DEMO_REMIT_PROVIDER: [
+                CallbackQueryHandler(handle_demo_remit_provider),
+            ],
+            ST_DEMO_CHALLENGES: [
+                CallbackQueryHandler(handle_demo_challenges),
+            ],
+            ST_DEMO_INTERESTS: [
+                CallbackQueryHandler(handle_demo_interests),
+            ],
+            ST_DEMO_SOURCE: [
+                CallbackQueryHandler(handle_demo_source),
+            ],
+            ST_DEMO_RESEARCH_CONSENT: [
+                CallbackQueryHandler(handle_demo_research_consent),
+            ],
+            ST_DEMO_MARKETING_CONSENT: [
+                CallbackQueryHandler(handle_demo_marketing_consent),
+            ],
         },
         fallbacks=[
             CommandHandler("start", cmd_start),
@@ -8481,6 +9257,10 @@ def main():
             CallbackQueryHandler(handle_menu),
         ],
     )
+
+    # Privacy handlers — registered BEFORE conv so they work from any state
+    app.add_handler(CommandHandler("privacidad", cmd_privacidad))
+    app.add_handler(CallbackQueryHandler(handle_privacidad_callback, pattern="^priv_"))
 
     app.add_handler(conv)
 
@@ -8528,6 +9308,7 @@ def main():
     app.add_handler(CommandHandler("addpartner", cmd_addpartner), group=-1)
     app.add_handler(CommandHandler("partners", cmd_partners), group=-1)
     app.add_handler(CommandHandler("partnercard", cmd_partnercard), group=-1)
+    app.add_handler(CommandHandler("demographics", cmd_demographics), group=-1)
     app.add_handler(CallbackQueryHandler(handle_admin_doc_callback, pattern="^adoc_"), group=-1)
     app.add_handler(CallbackQueryHandler(handle_pending_doc_callback, pattern="^pdoc_"), group=-1)
     app.add_handler(CallbackQueryHandler(handle_rejection_reason_callback, pattern="^prej_"), group=-1)
@@ -8542,7 +9323,7 @@ def main():
         job_queue.run_repeating(send_reminder_1week, interval=timedelta(hours=6), first=timedelta(minutes=15))
         logger.info("Re-engagement reminders scheduled (24h, 72h, 1week)")
 
-    logger.info("PH-Bot v6.3.0 starting")
+    logger.info("PH-Bot v6.4.0 starting")
     logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
     logger.info(f"Payment: FREE > €{PRICING['phase2']} > €{PRICING['phase3']} > €{PRICING['phase4']} | Days left: {days_left()} | BOE: {BOE_PUBLISHED}")
     logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
