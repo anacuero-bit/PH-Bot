@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
 """
 ================================================================================
-PH-Bot v6.2.0 — Client Intake & Case Management
+PH-Bot v6.3.0 — Client Intake & Case Management
 ================================================================================
 Repository: github.com/anacuero-bit/PH-Bot
-Updated:    2026-02-15
+Updated:    2026-02-18
 
 CHANGELOG:
 ----------
+v6.3.0 (2026-02-18)
+  - NEW: Institutional partner system (B2B referrals)
+  - NEW: /addpartner <name> <location> — create business partner with INST code
+  - NEW: /partners — list all partners with stats
+  - NEW: /partnercard <code> — regenerate sharing card image
+  - NEW: institutional_partners DB table
+  - NEW: Partner sharing card generator (Pillow + qrcode)
+  - NEW: Bot handles INST- prefix codes in /start deep links
+  - NEW: Payout tracking (€20/full phases, €15/prepay)
+  - NEW: FIELD_AGENT_IDS env var — scoped permissions for street team (partner commands only)
+  - UPDATED: /admin help includes new partner commands
+
 v6.2.0 (2026-02-15)
   - NEW: /admin — list all admin commands with usage
   - NEW: /deleteuser <tid> — delete user + all data (docs, cases, messages, referrals, waitlist)
@@ -223,6 +235,7 @@ ENV VARS:
   BIZUM_PHONE         Bizum number
   BANK_IBAN           Transfer IBAN
   ANTHROPIC_API_KEY   (optional, for AI escalation)
+  FIELD_AGENT_IDS     comma-separated Telegram IDs (partner commands only)
 ================================================================================
 """
 
@@ -267,6 +280,14 @@ try:
 except ImportError:
     IMAGE_ANALYSIS = False
 
+# Optional: Partner card generation (Pillow drawing + qrcode)
+try:
+    from PIL import ImageDraw, ImageFont
+    import qrcode
+    HAS_PILLOW = True
+except ImportError:
+    HAS_PILLOW = False
+
 # Optional: PostgreSQL (for Railway production)
 try:
     import psycopg2
@@ -290,6 +311,7 @@ except ImportError:
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_CHAT_IDS", "").split(",") if x.strip()]
+FIELD_AGENT_IDS = [int(x.strip()) for x in os.environ.get("FIELD_AGENT_IDS", "").split(",") if x.strip()]
 SUPPORT_PHONE = os.environ.get("SUPPORT_PHONE", "+34 600 000 000")
 BIZUM_PHONE = os.environ.get("BIZUM_PHONE", "+34 600 000 000")
 BANK_IBAN = os.environ.get("BANK_IBAN", "ES00 0000 0000 0000 0000 0000")
@@ -453,6 +475,14 @@ TIER_BENEFITS = {
         "Descuento de por vida en servicios",
     ],
 }
+
+# =============================================================================
+# INSTITUTIONAL PARTNER SYSTEM — B2B Referrals
+# =============================================================================
+
+INST_PAYOUT_FULL_PHASES = 20    # €20 when referred client pays full €247 (all phases)
+INST_PAYOUT_PREPAY = 15         # €15 when referred client pays €199 (prepay)
+INST_PAYOUT_MINIMUM = 30        # Minimum €30 accumulated to trigger payout
 
 # =============================================================================
 # COUNTRY DATA (no slang greetings — professional tone)
@@ -1867,6 +1897,68 @@ def init_db():
     except Exception:
         conn.rollback()
 
+    # =================================================================
+    # Institutional partners table
+    # =================================================================
+    if USE_POSTGRES:
+        c.execute("""CREATE TABLE IF NOT EXISTS institutional_partners (
+            id SERIAL PRIMARY KEY,
+            code VARCHAR(50) UNIQUE NOT NULL,
+            business_name VARCHAR(100) NOT NULL,
+            location VARCHAR(100),
+            contact_name VARCHAR(100),
+            contact_phone VARCHAR(30),
+            contact_whatsapp VARCHAR(30),
+            payout_method VARCHAR(20) DEFAULT 'bizum',
+            payout_bizum VARCHAR(30),
+            payout_iban VARCHAR(40),
+            total_referrals INTEGER DEFAULT 0,
+            total_paid_full INTEGER DEFAULT 0,
+            total_paid_prepay INTEGER DEFAULT 0,
+            balance REAL DEFAULT 0,
+            total_paid_out REAL DEFAULT 0,
+            active INTEGER DEFAULT 1,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by BIGINT
+        )""")
+    else:
+        c.execute("""CREATE TABLE IF NOT EXISTS institutional_partners (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            code VARCHAR(50) UNIQUE NOT NULL,
+            business_name VARCHAR(100) NOT NULL,
+            location VARCHAR(100),
+            contact_name VARCHAR(100),
+            contact_phone VARCHAR(30),
+            contact_whatsapp VARCHAR(30),
+            payout_method VARCHAR(20) DEFAULT 'bizum',
+            payout_bizum VARCHAR(30),
+            payout_iban VARCHAR(40),
+            total_referrals INTEGER DEFAULT 0,
+            total_paid_full INTEGER DEFAULT 0,
+            total_paid_prepay INTEGER DEFAULT 0,
+            balance REAL DEFAULT 0,
+            total_paid_out REAL DEFAULT 0,
+            active INTEGER DEFAULT 1,
+            notes TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            created_by BIGINT
+        )""")
+
+    # Add referred_by_type to users table (to distinguish friend vs business referrals)
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN referred_by_type VARCHAR(10) DEFAULT 'friend'")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
+    # Index for institutional partners
+    try:
+        c.execute("CREATE INDEX IF NOT EXISTS idx_inst_partners_code ON institutional_partners(code)")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+
     conn.commit()
     conn.close()
 
@@ -2555,7 +2647,7 @@ def generate_referral_code(user_id: int) -> str:
 
 
 def validate_referral_code(code: str) -> dict:
-    """Validate referral code and return referrer info."""
+    """Validate referral code — checks both friend codes and institutional codes."""
     if not code or len(code) < 3:
         return {'valid': False, 'error': 'invalid_format'}
 
@@ -2564,6 +2656,23 @@ def validate_referral_code(code: str) -> dict:
     conn = get_connection()
     c = conn.cursor()
     p = db_param()
+
+    # Check if institutional code (INST- prefix)
+    if code.startswith("INST-"):
+        c.execute(f"SELECT code, business_name FROM institutional_partners WHERE code = {p} AND active = 1", (code,))
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            return {'valid': False, 'error': 'not_found'}
+        return {
+            'valid': True,
+            'code': row[0],
+            'referrer_name': row[1],
+            'referrer_id': None,
+            'code_type': 'institutional',
+        }
+
+    # Otherwise check friend codes in users table
     c.execute(f"SELECT telegram_id, first_name FROM users WHERE referral_code = {p}", (code,))
     row = c.fetchone()
     conn.close()
@@ -2575,7 +2684,8 @@ def validate_referral_code(code: str) -> dict:
         'valid': True,
         'referrer_id': row[0],
         'referrer_name': row[1],
-        'code': code
+        'code': code,
+        'code_type': 'friend',
     }
 
 
@@ -2608,6 +2718,102 @@ def apply_referral_code_to_user(user_id: int, code: str, referrer_id: int) -> bo
         conn.rollback()
         logger.error(f"Error applying referral: {e}")
         return False
+    finally:
+        conn.close()
+
+
+def apply_institutional_referral(user_id: int, inst_code: str) -> bool:
+    """Store institutional referral relationship."""
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+
+    try:
+        # Update user with institutional code
+        c.execute(f"""
+            UPDATE users
+            SET referred_by_code = {p}, referred_by_type = 'institutional'
+            WHERE telegram_id = {p} AND referred_by_code IS NULL
+        """, (inst_code, user_id))
+
+        # Increment partner's total referrals
+        c.execute(f"""
+            UPDATE institutional_partners
+            SET total_referrals = total_referrals + 1
+            WHERE code = {p}
+        """, (inst_code,))
+
+        # Log event
+        c.execute(f"""
+            INSERT INTO referral_events (user_id, event_type, description)
+            VALUES ({p}, 'inst_code_used', {p})
+        """, (user_id, f"Used institutional code {inst_code}"))
+
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error applying institutional referral: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def credit_institutional_partner(user_id: int, payment_type: str) -> dict:
+    """
+    Credit institutional partner when referred user pays in full.
+
+    payment_type: 'prepay' (€199) or 'full_phases' (€247 all phases complete)
+    Returns: {'credited': bool, 'partner_code': str, 'amount': float}
+    """
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+
+    try:
+        # Check if user was referred by institutional code
+        c.execute(f"""
+            SELECT referred_by_code, referred_by_type
+            FROM users WHERE telegram_id = {p}
+        """, (user_id,))
+        row = c.fetchone()
+
+        if not row or not row[0] or row[1] != 'institutional':
+            conn.close()
+            return {'credited': False, 'reason': 'not_institutional_referral'}
+
+        inst_code = row[0]
+
+        # Determine payout amount
+        if payment_type == 'prepay':
+            amount = INST_PAYOUT_PREPAY  # €15
+            c.execute(f"""
+                UPDATE institutional_partners
+                SET total_paid_prepay = total_paid_prepay + 1,
+                    balance = balance + {p}
+                WHERE code = {p}
+            """, (amount, inst_code))
+        else:  # full_phases
+            amount = INST_PAYOUT_FULL_PHASES  # €20
+            c.execute(f"""
+                UPDATE institutional_partners
+                SET total_paid_full = total_paid_full + 1,
+                    balance = balance + {p}
+                WHERE code = {p}
+            """, (amount, inst_code))
+
+        # Log event
+        c.execute(f"""
+            INSERT INTO referral_events (user_id, event_type, amount, description)
+            VALUES ({p}, 'inst_credit', {p}, {p})
+        """, (user_id, amount, f"Partner {inst_code} earned €{amount} ({payment_type})"))
+
+        conn.commit()
+        return {'credited': True, 'partner_code': inst_code, 'amount': amount}
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Error crediting institutional partner: {e}")
+        return {'credited': False, 'reason': str(e)}
     finally:
         conn.close()
 
@@ -3893,25 +4099,42 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
     # Check for referral code in start param (deep link: t.me/bot?start=CODE)
     if ctx.args and len(ctx.args) > 0:
         code = ctx.args[0].upper().strip()
+
+        # Strip inst_ prefix from deep link format (Telegram doesn't allow hyphens in start params)
+        # Deep link: t.me/bot?start=INST_ELPAISANO_USERA → code: INST-ELPAISANO-USERA
+        if code.startswith("INST_"):
+            code = "INST-" + code[5:].replace("_", "-")
+
         result = validate_referral_code(code)
 
-        if result['valid'] and result['referrer_id'] != tid:
-            apply_referral_code_to_user(tid, result['code'], result['referrer_id'])
+        if result['valid']:
+            code_type = result.get('code_type', 'friend')
+            source_name = None
 
-            await update.message.reply_text(
-                f"🎉 ¡Código aplicado! Tienes *€{PRICING['referral_discount']} de descuento* en tu Fase 4.\n\n"
-                "🇪🇸 *¡Bienvenido/a a tuspapeles2026!*\n\n"
-                "Muchos extranjeros perdieron la oportunidad de regularización en 2005 "
-                "por errores en sus solicitudes o por mala asesoría. Por eso, en colaboración "
-                "con abogados de extranjería colegiados y expertos en legaltech e inteligencia "
-                "artificial, hemos diseñado una tecnología enfocada en reducir al máximo la "
-                "probabilidad de error humano durante todas las fases del proceso.\n\n"
-                "Empecemos verificando si cumples los requisitos básicos.\n\n"
-                "Para empezar, indícanos tu país de origen:",
-                parse_mode=ParseMode.MARKDOWN,
-                reply_markup=country_kb(),
-            )
-            return ST_COUNTRY
+            if code_type == 'institutional':
+                # Institutional code — store relationship
+                apply_institutional_referral(tid, result['code'])
+                source_name = result['referrer_name']
+            elif result['referrer_id'] != tid:
+                # Friend code — existing logic
+                apply_referral_code_to_user(tid, result['code'], result['referrer_id'])
+                source_name = result['referrer_name']
+
+            if source_name:
+                await update.message.reply_text(
+                    f"🎉 ¡Código aplicado! Tienes *€{PRICING['referral_discount']} de descuento* en tu Fase 4.\n\n"
+                    "🇪🇸 *¡Bienvenido/a a tuspapeles2026!*\n\n"
+                    "Muchos extranjeros perdieron la oportunidad de regularización en 2005 "
+                    "por errores en sus solicitudes o por mala asesoría. Por eso, en colaboración "
+                    "con abogados de extranjería colegiados y expertos en legaltech e inteligencia "
+                    "artificial, hemos diseñado una tecnología enfocada en reducir al máximo la "
+                    "probabilidad de error humano durante todas las fases del proceso.\n\n"
+                    "Empecemos verificando si cumples los requisitos básicos.\n\n"
+                    "Para empezar, indícanos tu país de origen:",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=country_kb(),
+                )
+                return ST_COUNTRY
 
     # Normal start - ask if they have a referral code
     await update.message.reply_text(
@@ -4027,8 +4250,12 @@ async def handle_referral_code_text(update: Update, ctx: ContextTypes.DEFAULT_TY
         )
         return ST_ENTER_REFERRAL_CODE
 
-    # Can't use own code
-    if result['referrer_id'] == tid:
+    # Handle by code type
+    if result.get('code_type') == 'institutional':
+        # Institutional code — apply directly
+        apply_institutional_referral(tid, result['code'])
+    elif result['referrer_id'] == tid:
+        # Can't use own code
         await update.message.reply_text(
             "No puedes usar tu propio código.",
             reply_markup=InlineKeyboardMarkup([
@@ -4036,12 +4263,12 @@ async def handle_referral_code_text(update: Update, ctx: ContextTypes.DEFAULT_TY
             ]),
         )
         return ST_ENTER_REFERRAL_CODE
-
-    # Apply code
-    apply_referral_code_to_user(tid, result['code'], result['referrer_id'])
+    else:
+        # Friend code — existing logic
+        apply_referral_code_to_user(tid, result['code'], result['referrer_id'])
 
     await update.message.reply_text(
-        f"Código aplicado. Tienes €{PRICING['referral_discount']} de descuento en tu primer pago.\n\n"
+        f"Código aplicado. Tienes €{PRICING['referral_discount']} de descuento en tu Fase 4.\n\n"
         "Para empezar, indíquenos su país de origen:",
         parse_mode=ParseMode.MARKDOWN,
         reply_markup=country_kb(),
@@ -4973,6 +5200,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
         # Unlock tier when user completes full payment
         unlock_referrer_tier(tid, instant_consul=False)
 
+        # Credit institutional partner if applicable
+        credit_institutional_partner(tid, 'full_phases')
+
         u = get_user(tid)
         code = u.get("referral_code", "") if u else ""
         await notify_admins(ctx,
@@ -5017,6 +5247,9 @@ async def handle_menu(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> int:
 
         # €199 prepay = instant Cónsul
         unlock_referrer_tier(tid, instant_consul=True)
+
+        # Credit institutional partner if applicable
+        credit_institutional_partner(tid, 'prepay')
 
         await q.edit_message_text(
             f"💳 *Pago Único — €{price}*\n\n"
@@ -6290,6 +6523,10 @@ async def cmd_admin(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "/countries — Desglose por país\n"
         "/waitlist — Capacidad y lista de espera\n"
         "/export — Exportar CSV de usuarios\n\n"
+        "*Partners B2B:*\n"
+        "/addpartner <name> <location> [phone] — Crear partner B2B\n"
+        "/partners — Ver todos los partners y stats\n"
+        "/partnercard <code> — Regenerar tarjeta de partner\n\n"
         "*Operaciones:*\n"
         "/release [N] — Notificar lista de espera\n"
         "/reset — Reiniciar cuenta propia"
@@ -6824,6 +7061,248 @@ async def cmd_export(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             caption=f"📊 {len(rows)} usuarios exportados")
     except Exception as e:
         await update.message.reply_text(f"Error: {e}")
+
+
+# =============================================================================
+# INSTITUTIONAL PARTNER COMMANDS
+# =============================================================================
+
+def generate_partner_card(code: str, business_name: str, location: str) -> str:
+    """
+    Generate a branded sharing card image for a partner.
+    Returns path to the generated image, or None if Pillow not available.
+
+    Card layout (1080x1350px — Instagram story friendly):
+    - Top: tp26 logo / brand bar
+    - Middle: Business name + "Colaborador oficial"
+    - QR code pointing to bot deep link
+    - Bottom: CTA text + tuspapeles2026.es
+    """
+    if not HAS_PILLOW:
+        logger.warning("Pillow not installed, skipping card generation")
+        return None
+
+    # Card dimensions (1080x1350 = 4:5 ratio, good for print and social)
+    W, H = 1080, 1350
+
+    # Colors (brand)
+    NAVY = (26, 54, 93)        # #1A365D
+    BLUE = (55, 114, 175)      # #3772AF
+    WHITE = (255, 255, 255)
+    GOLD = (196, 167, 103)     # #C4A767
+    DARK_TEXT = (45, 55, 72)
+
+    img = Image.new('RGB', (W, H), WHITE)
+    draw = ImageDraw.Draw(img)
+
+    # Try to load fonts (fall back to default if not available)
+    try:
+        font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 52)
+        font_medium = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 36)
+        font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 28)
+        font_code = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 32)
+        font_cta = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40)
+    except (OSError, IOError):
+        font_large = ImageFont.load_default()
+        font_medium = font_large
+        font_small = font_large
+        font_code = font_large
+        font_cta = font_large
+
+    # === TOP BAR (navy background) ===
+    draw.rectangle([(0, 0), (W, 180)], fill=NAVY)
+
+    # Brand text
+    draw.text((W // 2, 60), "tuspapeles2026", fill=WHITE, font=font_large, anchor="mt")
+    draw.text((W // 2, 130), "Regularización Extraordinaria 2026", fill=GOLD, font=font_small, anchor="mt")
+
+    # === GOLD DIVIDER ===
+    draw.rectangle([(100, 180), (W - 100, 186)], fill=GOLD)
+
+    # === COLABORADOR OFICIAL ===
+    draw.text((W // 2, 240), "COLABORADOR OFICIAL", fill=BLUE, font=font_medium, anchor="mt")
+
+    # === BUSINESS NAME (large) ===
+    display_name = business_name[:30]
+    draw.text((W // 2, 320), display_name, fill=NAVY, font=font_large, anchor="mt")
+
+    # Location
+    draw.text((W // 2, 390), location, fill=DARK_TEXT, font=font_medium, anchor="mt")
+
+    # === GOLD DIVIDER ===
+    draw.rectangle([(100, 450), (W - 100, 456)], fill=GOLD)
+
+    # === QR CODE ===
+    deep_link_param = code.replace("-", "_")
+    qr_url = f"https://t.me/TusPapeles2026Bot?start={deep_link_param}"
+
+    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=2)
+    qr.add_data(qr_url)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color=NAVY, back_color="white").convert('RGB')
+    qr_img = qr_img.resize((380, 380))
+
+    # Center QR
+    qr_x = (W - 380) // 2
+    qr_y = 490
+    img.paste(qr_img, (qr_x, qr_y))
+
+    # === CTA TEXT ===
+    draw.text((W // 2, 910), "Escanea y verifica GRATIS", fill=NAVY, font=font_cta, anchor="mt")
+    draw.text((W // 2, 960), "si calificas para la regularización", fill=DARK_TEXT, font=font_medium, anchor="mt")
+
+    # === BENEFITS ===
+    y = 1030
+    benefits = [
+        "Sin compromiso · 100% online",
+        "Abogados colegiados · IA para evitar errores",
+        f"€{FRIEND_DISCOUNT} de descuento con código de este local",
+    ]
+    for b in benefits:
+        draw.text((W // 2, y), b, fill=DARK_TEXT, font=font_small, anchor="mt")
+        y += 42
+
+    # === BOTTOM BAR ===
+    draw.rectangle([(0, H - 120), (W, H)], fill=NAVY)
+    draw.text((W // 2, H - 80), "tuspapeles2026.es", fill=WHITE, font=font_medium, anchor="mt")
+    draw.text((W // 2, H - 35), f"Código: {code}", fill=GOLD, font=font_small, anchor="mt")
+
+    # Save
+    output_path = f"/tmp/partner_card_{code}.png"
+    img.save(output_path, "PNG", quality=95)
+    return output_path
+
+
+async def cmd_addpartner(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Create institutional partner. Usage: /addpartner <name> <location> [contact_phone]"""
+    if update.effective_user.id not in ADMIN_IDS and update.effective_user.id not in FIELD_AGENT_IDS:
+        return
+
+    if not ctx.args or len(ctx.args) < 2:
+        await update.message.reply_text(
+            "Uso: `/addpartner <nombre> <ubicación> [teléfono]`\n\n"
+            "Ejemplo: `/addpartner ElPaisano Usera 612345678`\n"
+            "Crea código: INST-ELPAISANO-USERA",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        return
+
+    name = ctx.args[0].upper().strip()
+    location = ctx.args[1].upper().strip()
+    phone = ctx.args[2] if len(ctx.args) > 2 else None
+
+    # Clean: only alphanumeric
+    clean_name = ''.join(c for c in name if c.isalnum())
+    clean_loc = ''.join(c for c in location if c.isalnum())
+
+    code = f"INST-{clean_name}-{clean_loc}"
+
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+
+    try:
+        c.execute(f"""
+            INSERT INTO institutional_partners (code, business_name, location, contact_phone, created_by)
+            VALUES ({p}, {p}, {p}, {p}, {p})
+        """, (code, name.title(), location.title(), phone, update.effective_user.id))
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        conn.close()
+        await update.message.reply_text(f"Error: código `{code}` ya existe o error DB: {e}", parse_mode=ParseMode.MARKDOWN)
+        return
+    finally:
+        conn.close()
+
+    # Generate sharing card image
+    card_path = generate_partner_card(code, name.title(), location.title())
+
+    # Build the deep link (Telegram doesn't allow hyphens in start params)
+    deep_link_param = code.replace("-", "_")
+    bot_link = f"t.me/TusPapeles2026Bot?start={deep_link_param}"
+    web_link = f"tuspapeles2026.es?ref={code}"
+
+    await update.message.reply_text(
+        f"*Partner creado*\n\n"
+        f"Código: `{code}`\n"
+        f"Negocio: {name.title()}\n"
+        f"Ubicación: {location.title()}\n"
+        f"Teléfono: {phone or 'N/A'}\n\n"
+        f"Enlace bot: `{bot_link}`\n"
+        f"Enlace web: `{web_link}`\n\n"
+        f"Pago: €{INST_PAYOUT_FULL_PHASES}/cliente (fases) · €{INST_PAYOUT_PREPAY}/cliente (prepago)\n"
+        f"Mínimo pago: €{INST_PAYOUT_MINIMUM}",
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
+    # Send the card image
+    if card_path and os.path.exists(card_path):
+        with open(card_path, 'rb') as f:
+            await update.message.reply_photo(
+                photo=f,
+                caption=f"Tarjeta para {name.title()} — comparte o imprime"
+            )
+        os.remove(card_path)  # Clean up
+
+
+async def cmd_partners(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """List all institutional partners with stats."""
+    if update.effective_user.id not in ADMIN_IDS and update.effective_user.id not in FIELD_AGENT_IDS:
+        return
+
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT code, business_name, location, total_referrals, total_paid_full, total_paid_prepay, balance, active FROM institutional_partners ORDER BY created_at DESC")
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        await update.message.reply_text("No hay partners institucionales.")
+        return
+
+    lines = ["*PARTNERS INSTITUCIONALES*\n"]
+    for r in rows:
+        code, bname, loc, refs, full, prepay, bal, active = r
+        status = "✅" if active else "⏸"
+        earned = (full * INST_PAYOUT_FULL_PHASES) + (prepay * INST_PAYOUT_PREPAY)
+        lines.append(
+            f"{status} *{bname}* ({loc})\n"
+            f"   Código: `{code}`\n"
+            f"   Referidos: {refs} | Pagados: {full + prepay} (fases:{full} prepay:{prepay})\n"
+            f"   Balance pendiente: €{bal:.0f} | Total generado: €{earned:.0f}\n"
+        )
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.MARKDOWN)
+
+
+async def cmd_partnercard(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Regenerate partner sharing card. Usage: /partnercard <code>"""
+    if update.effective_user.id not in ADMIN_IDS and update.effective_user.id not in FIELD_AGENT_IDS:
+        return
+
+    if not ctx.args:
+        await update.message.reply_text("Uso: `/partnercard INST-NOMBRE-UBICACION`", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    code = ctx.args[0].upper().strip()
+
+    conn = get_connection()
+    c = conn.cursor()
+    p = db_param()
+    c.execute(f"SELECT business_name, location FROM institutional_partners WHERE code = {p}", (code,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        await update.message.reply_text(f"Partner `{code}` no encontrado.", parse_mode=ParseMode.MARKDOWN)
+        return
+
+    card_path = generate_partner_card(code, row[0], row[1])
+    if card_path and os.path.exists(card_path):
+        with open(card_path, 'rb') as f:
+            await update.message.reply_photo(photo=f, caption=f"Tarjeta para {row[0]}")
+        os.remove(card_path)
 
 
 async def cmd_user(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -8046,6 +8525,9 @@ def main():
     app.add_handler(CommandHandler("broadcastpaid", cmd_broadcastpaid), group=-1)
     app.add_handler(CommandHandler("broadcastcountry", cmd_broadcastcountry), group=-1)
     app.add_handler(CommandHandler("export", cmd_export), group=-1)
+    app.add_handler(CommandHandler("addpartner", cmd_addpartner), group=-1)
+    app.add_handler(CommandHandler("partners", cmd_partners), group=-1)
+    app.add_handler(CommandHandler("partnercard", cmd_partnercard), group=-1)
     app.add_handler(CallbackQueryHandler(handle_admin_doc_callback, pattern="^adoc_"), group=-1)
     app.add_handler(CallbackQueryHandler(handle_pending_doc_callback, pattern="^pdoc_"), group=-1)
     app.add_handler(CallbackQueryHandler(handle_rejection_reason_callback, pattern="^prej_"), group=-1)
@@ -8060,7 +8542,7 @@ def main():
         job_queue.run_repeating(send_reminder_1week, interval=timedelta(hours=6), first=timedelta(minutes=15))
         logger.info("Re-engagement reminders scheduled (24h, 72h, 1week)")
 
-    logger.info("PH-Bot v6.2.0 starting")
+    logger.info("PH-Bot v6.3.0 starting")
     logger.info(f"ADMIN_IDS: {ADMIN_IDS}")
     logger.info(f"Payment: FREE > €{PRICING['phase2']} > €{PRICING['phase3']} > €{PRICING['phase4']} | Days left: {days_left()} | BOE: {BOE_PUBLISHED}")
     logger.info(f"Database: {'PostgreSQL' if USE_POSTGRES else 'SQLite'}")
